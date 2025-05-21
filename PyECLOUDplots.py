@@ -1,0 +1,838 @@
+import threading
+import os
+import warnings
+import re
+import myfilemanager as mfm
+from collections import defaultdict
+import numpy as np
+import io
+import sys
+import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
+from scipy.interpolate import PchipInterpolator
+from typing import Callable, Any, Union
+from time import time
+import matplotlib as mpl
+import yaml
+
+class PyECLOUDsim:
+    def __init__(self, input_folder: str, sim_output_filename: str = "output.mat", params_yaml = None, load_sim_data: bool = True):
+        if not os.path.exists(input_folder):
+            raise IsADirectoryError("Provided input path path does not exist")
+        if not params_yaml:
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            self.params_yaml = os.path.join(script_dir, 'params.yaml')
+        else:
+            if os.path.exists(params_yaml):
+                self.params_yaml = params_yaml
+            else:
+                raise FileNotFoundError("Params YAML file not found")
+            
+        self.input_folder = input_folder
+        self.sim_output_filename = sim_output_filename
+        self.sim_data_loaded = load_sim_data
+        self.sim_data = None # Simulation output in object form
+        # self.SEY = None # Value of SEY
+        # self.intensity = None # Value of Intensity
+        # self.beam_filling_pattern = None # Beam Filling Pattern used
+        # self.photoemission_enabled = None # Determines whether photoemission is used or not
+        # self.beam_energy = None # Beam energy in eV
+        # self.magnet_conf = None # Magnetic field configuration
+        sim_filenames = self.parse_values_from_files(["machine_param_file",
+                                                      "secondary_emission_parameters_file",
+                                                      "beam_parameters_file",
+                                                      "progress_path"],
+                                                      ["simulation_parameters.input"]                                                     
+                                                      )
+        self.machine_param_file = sim_filenames['machine_param_file']
+        self.SEY_params_file = sim_filenames['secondary_emission_parameters_file']
+        self.beam_params_file = sim_filenames['beam_parameters_file']
+        with open(os.path.join(self.input_folder,sim_filenames['progress_path'])) as f:
+            sim_progress = float(f.read().strip())
+        if sim_progress < 0.9:
+            warnings.warn(f"!----Simulation progress below 0.9. Simulation at {self.input_folder} might be incomplete.----!")
+        self._load_sim_from_yaml_()
+        # self._load_sim_()
+
+    # This ensures that all attributes from sim_data are accessible from the main class
+    def __getattr__(self, name):
+        # Only called if the attribute wasn't found on self
+        return getattr(self.sim_data, name)
+    
+    def _convert_data_to_dtype_(self, value, dtype_str, dtype_map: dict = {
+                                    'float': float,
+                                    'int': int,
+                                    'str': str,
+                                    'bool': lambda x: str(x).lower() in ['true', '1', 'yes'],
+                                }):
+        try:
+            converter = dtype_map.get(dtype_str)
+            if not converter:
+                raise ValueError(f"Unsupported dtype: {dtype_str}")
+            return converter(value)
+        except Exception as e:
+            raise ValueError(f"Error converting value '{value}' to type '{dtype_str}': {e}")
+
+
+    def _load_sim_from_yaml_(self):
+        with open(self.params_yaml, 'r') as file:
+            params = yaml.safe_load(file)
+        if self.sim_data_loaded:
+            self.sim_data = mfm.myloadmat_to_obj(os.path.join(self.input_folder,self.sim_output_filename))
+        param_names = params.keys()
+        vars_to_load = [entry.get('var_name') for entry in params.values()]
+        sim_params = self.parse_values_from_files(vars_to_load)
+        
+        for param in param_names:
+            attr_name = param.replace(" ", "_")
+            setattr(self, attr_name, self._convert_data_to_dtype_(sim_params[params[param]["var_name"]], params[param]["dtype"]))
+        
+        return params, vars_to_load
+
+    def _load_sim_(self):
+        if self.sim_data_loaded:
+            self.sim_data = mfm.myloadmat_to_obj(os.path.join(self.input_folder,self.sim_output_filename))
+        sim_params = self.parse_values_from_files(["del_max",
+                                                   "filling_pattern_file",
+                                                   "fact_beam",
+                                                   "photoem_flag",
+                                                   "energy_eV",
+                                                   "B_multip"])
+        self.SEY = float(sim_params['del_max'])
+        self.beam_filling_pattern = sim_params['filling_pattern_file']
+        self.photoemission_enabled = bool(int(sim_params['photoem_flag']))
+        self.beam_energy = float(sim_params['energy_eV'])
+        self.intensity = float(sim_params['fact_beam'])
+        self.magnet_conf = sim_params['B_multip']
+
+    def parse_values_from_files(self,attribute_names: list,filenames: list = None):
+        '''
+        Get attributes from simulation files. attribute_names is a list of strings, filenames (optional) can be used to specify specific filenames to search
+        '''
+        
+        if filenames is None:
+            filenames = [self.machine_param_file,
+                         self.SEY_params_file,
+                         self.beam_params_file
+                         ]
+            
+        def find_attribute(attribute_name, lines, attribute_vals, lock):
+            pattern = re.compile(rf"^{attribute_name}\s*=\s*(.+)$")
+            for line in lines:
+                match = pattern.match(line.strip())
+                if match:
+                    value = match.group(1).strip()
+
+                    # Remove surrounding quotes if present
+                    if (value.startswith("'") and value.endswith("'")) or (value.startswith('"') and value.endswith('"')):
+                        value = value[1:-1]
+
+                    with lock:
+                        attribute_vals[attribute_name] = value
+                    return
+            raise Exception(f"{attribute_name} not found in simulation files")
+
+        lines = []
+        for filename in filenames:
+            with open(os.path.join(self.input_folder,filename)) as f:
+                lines.extend(f.readlines())
+        
+        attribute_vals = {}
+        lock = threading.Lock()
+        threads = []
+
+        for attribute_name in attribute_names:
+            thread = threading.Thread(target=find_attribute, args=(attribute_name, lines, attribute_vals, lock))
+            threads.append(thread)
+            thread.start()
+        
+        for thread in threads:
+            thread.join()
+
+        return attribute_vals
+    
+    def extract_beam_params(self):
+        '''
+        Returns an array containing beam parameters in the format:
+        [number of trains,
+        number of pattern inside train,
+        number of bunches,
+        intensity multiplier for bunches,
+        number of empty slots,
+        intensity multiplier for empty slots,
+        number of empty slots between trains,
+        intensity multiplier for empty slots]
+        '''
+        # Regex pattern to match the structure
+        pattern = r"""
+            ^\s*                            # Optional leading whitespace
+            (\d+)\*                         # train_num (e.g., 2) followed by *
+            \(\s*                           # Opening outer parenthesis
+            (\d+)\*                         # repetitions (e.g., 4) followed by *
+            \(\s*                           # Opening inner parenthesis
+            (\d+)\*\[([\d.]+)\]             # filled_bunches * [intensity]
+            \+                              # plus sign
+            (\d+)\*\[([\d.]+)\]             # empty_bunches * [0.]
+            \)\s*                           # Close inner parenthesis
+            (?:\+\s*(\d+)\*\[([\d.]+)\])?   # Optional + outer empty slots * [value]
+            \)\s*$                          # Close outer parenthesis and end
+        """
+
+        match = re.match(pattern, self.Beam_Filling_Pattern, re.VERBOSE)
+        if not match:
+            return None  # or raise ValueError("Pattern mismatch")
+
+        groups = match.groups()
+
+        # Convert extracted values
+        result = [int(groups[0]), int(groups[1]), int(groups[2]), float(groups[3]),
+                int(groups[4]), float(groups[5])]
+
+        # Optional values
+        if groups[6] is not None and groups[7] is not None:
+            result.extend([int(groups[6]), float(groups[7])])
+        else:
+            result.extend([0, 0.0])
+
+        return result
+
+    def get_i_train_idx(self,train_num = -1):
+        '''
+        Get index of the i-th train for data saved per bunch passage. If unspecified, the index for the last train is returned.
+        '''
+        params = self.extract_beam_params()
+        n_trains = params[0]
+        n_reps_inside_train = params[1]
+        n_filled = params[2]
+        n_empty = params[4]
+        n_sep_trains = params[6]
+        train_length = n_reps_inside_train*(n_filled+n_empty) + n_sep_trains
+        if train_num == -1:
+            return ((n_trains-1)*train_length) - 1
+        else:
+            if train_num > n_trains:
+                raise ValueError("Train index must not exceed number of total trains. Trains are considered 1-indexed")
+            return ((train_num-1)*train_length) - 1
+    
+    def get_i_train_timestep_idx(self, train_num = -1):
+        '''
+        Get index of the i-th train for data saved every timestep. If unspecified, the index for the last train is returned.
+        '''
+        params = self.extract_beam_params()
+        reference_bunch_list = self.t_hist
+        reference_timestep_list = self.t
+        n_trains = params[0]
+        n_reps_inside_train = params[1]
+        n_filled = params[2]
+        n_empty = params[4]
+        n_sep_trains = params[6]
+        train_length = n_reps_inside_train*(n_filled+n_empty) + n_sep_trains
+        num_chunks = reference_bunch_list.shape[0]
+        chunk_size = reference_timestep_list.shape[0] / num_chunks
+        if train_num == -1:
+            return int((((n_trains-1)*train_length))*chunk_size - 1)
+        else:
+            if train_num > n_trains:
+                raise ValueError("Train index must not exceed number of total trains. Trains are considered 1-indexed")
+            return int((((train_num-1)*train_length))*chunk_size - 1)
+
+    def timestep_list_to_bunch_list(self, list_to_be_rescaled, mode="sum"):
+        '''
+        Convert list saved for every timestep to list saved for every bunch passage.
+
+        Parameters:
+            - list_to_be_rescaled: np.array of values per timestep
+            - mode: "sum" or "avg" — controls aggregation function per bunch
+        '''
+
+        if mode not in ("sum", "avg"):
+            raise ValueError("mode must be either 'sum' or 'avg'")
+
+        reference_bunch_list = self.t_hist
+        reference_timestep_list = self.t
+        num_chunks = reference_bunch_list.shape[0]
+        chunk_size = reference_timestep_list.shape[0] / num_chunks
+
+        rescaled_list = np.array([
+            list_to_be_rescaled[int(i*chunk_size):int((i+1)*chunk_size)].sum()
+            if mode == "sum" else
+            list_to_be_rescaled[int(i*chunk_size):int((i+1)*chunk_size)].mean()
+            for i in range(num_chunks)
+        ])
+        
+        return rescaled_list
+    
+    def calculate_heat_load_per_bunch(self, T_rev: float = 88.9e-6, unit: str = "mW"):
+        '''
+        Calculate heat load from simulation. 
+
+        Parameters:
+            - T_rev: Revolution frequency in seconds
+            - unit: "mW", "W" or "eV" — unit for heatload. The option "eV" corresponds to eV/s units
+        '''
+        if unit not in ("mW", "W", "eV"):
+            raise ValueError("Available units for function are 'W', 'mW' and 'eV'")
+        qe = 1.60217657e-19
+
+        unit_multiplier = {
+            "eV" : 1,
+            "mW" : 1000*qe,
+            "W"  : qe
+        }
+
+        params = self.extract_beam_params()
+        n_reps_inside_train = params[1]
+        n_filled = params[2]
+        bunch_num_in_train = n_reps_inside_train*n_filled
+
+        return float(unit_multiplier[unit]*np.sum(self.sim_data.En_imp_eV_time[self.get_i_train_timestep_idx():])/(bunch_num_in_train*T_rev))
+
+
+class PyECLOUDParameterScan:
+    def __init__(self, simulations_path: str, params_yaml = None , sim_output_filename: str = "output.mat"):
+        if not os.path.exists(simulations_path):
+            raise IsADirectoryError("Provided simulations path does not exist")
+        self.simulations_path = simulations_path
+        self.sim_output_filename = sim_output_filename
+        self.sims_per_parameter = {}
+        if not params_yaml:
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            self.params_yaml = os.path.join(script_dir, 'params.yaml')
+        else:
+            if os.path.exists(params_yaml):
+                self.params_yaml = params_yaml
+            else:
+                raise FileNotFoundError("Params YAML file not found")
+        with open(self.params_yaml, 'r') as file:
+            self.params_dict = yaml.safe_load(file)
+        self.available_params = defaultdict(list)
+        n_sims = self._find_sim_folders_and_extract_params_yaml_()
+        # Convert intensity to smaller range while keeping absolute value
+        self.scaled_vals = []
+        for param in self.params_dict.keys():
+            if self.params_dict[param]["dtype"] in ["float", "int"]:
+                if self.params_dict[param]["convert_to_pow"]:
+                    attr_name = param.replace(" ", "_")+"_Pow"
+                    setattr(self, attr_name, int(np.log10(np.array(list(self.sims_per_parameter[param].keys())).mean())))
+                    keys = list(self.sims_per_parameter[param].keys())
+                    for key in keys:
+                        self.sims_per_parameter[param][float(key/(np.pow(10,getattr(self, attr_name))))] = self.sims_per_parameter[param].pop(key)
+                    self.scaled_vals.append(param)
+                    
+
+        print(f"Found {n_sims} simulations in {simulations_path}. Available parameters for analysis:")
+
+        # Key used for sorting numerical values
+        def try_numeric(val):
+            try:
+                return float(val)
+            except ValueError:
+                return val
+            
+        for key in self.sims_per_parameter.keys():
+            available_vals = list(self.sims_per_parameter[key].keys())
+            available_vals.sort(key=try_numeric)
+            if len(available_vals) > 1:
+                attr_name = key.replace(" ", "_")+"_Pow"
+                print(f"-'{key}'. With available values:{' (scaled by 1e%d)' % getattr(self,attr_name) if key in self.scaled_vals else ''}(Data Type: {type(available_vals[0])})")
+                
+                for val in available_vals:
+                    print(f"    ->{val}")
+                    self.available_params[key].append(val)
+        
+        buffer = io.StringIO()
+        sys_stdout = sys.stdout
+        sys.stdout = buffer
+        try:
+            self.print_available_params()
+        finally:
+            sys.stdout = sys_stdout  # Reset stdout
+
+        self.print_available_params_str = buffer.getvalue()
+
+    
+    def _find_sim_folders_and_extract_params_yaml_(self):
+        n_sims = 0
+        param_names = self.params_dict.keys()
+        for param in param_names:
+            self.sims_per_parameter[param] = defaultdict(set)
+        for root, dirs, files in os.walk(self.simulations_path):
+            if "simulation_parameters.input" in files and self.sim_output_filename in files:
+                sim = PyECLOUDsim(root, params_yaml=self.params_yaml, load_sim_data = False)
+                for param in param_names:
+                    attr_name = param.replace(" ", "_")
+                    self.sims_per_parameter[param][getattr(sim,attr_name)].add(root)
+                n_sims += 1
+        return n_sims
+    
+    def _find_sim_folders_and_extract_params_(self):
+        n_sims = 0
+        for root, dirs, files in os.walk(self.simulations_path):
+            if "simulation_parameters.input" in files and self.sim_output_filename in files:
+                sim = PyECLOUDsim(root, params_yaml=self.params_yaml, load_sim_data = False)
+                self.sims_per_parameter["SEY"][sim.SEY].add(root)
+                self.sims_per_parameter["Intensity"][sim.intensity].add(root)
+                self.sims_per_parameter["Magnet Configuration"][sim.magnet_conf].add(root)
+                self.sims_per_parameter["Beam Filling Pattern"][sim.beam_filling_pattern].add(root)
+                self.sims_per_parameter["Photoemission Enabled"][sim.photoemission_enabled].add(root)
+                self.sims_per_parameter["Beam Energy"][sim.beam_energy].add(root)
+                n_sims += 1
+        return n_sims
+    
+    def get_simulation(self, sim_params: dict, is_internal: bool = False):
+        '''
+        Find simulations with desired parameters. 
+
+        Parameters:
+            - sim_params:   Dictionary containing parameters of the desired simulation
+            - is_internal:  Not to be used. Determines whether an error is returned for non-existent simulations and supresses output
+        '''
+        scan_params = list(sim_params.keys())
+        param_num = len(scan_params)
+        try:
+            sim_loc = None
+            if param_num == 1:
+                sim_loc = self.sims_per_parameter[scan_params[0]][sim_params[scan_params[0]]]
+            elif param_num == 2:
+                sim_loc = self.sims_per_parameter[scan_params[0]][sim_params[scan_params[0]]].intersection(self.sims_per_parameter[scan_params[1]][sim_params[scan_params[1]]])
+            elif param_num > 2:
+                sim_loc = self.sims_per_parameter[scan_params[0]][sim_params[scan_params[0]]].intersection(self.sims_per_parameter[scan_params[1]][sim_params[scan_params[1]]])
+                for i in range(2,param_num):
+                    sim_loc = sim_loc.intersection(self.sims_per_parameter[scan_params[i]][sim_params[scan_params[i]]])
+            
+            if sim_loc == set():
+                if is_internal:
+                    return None
+                else:
+                    raise Exception(f"No simulation found for the provided parameters ({sim_params}). Please check provided parameters and their data types.")
+            else:
+                sim_loc_final = str(sim_loc.pop())
+                if sim_loc == set():
+                    if not is_internal:
+                        print(f"Simulation found at {sim_loc_final}")
+                    return PyECLOUDsim(sim_loc_final, sim_output_filename = self.sim_output_filename)
+                else:
+                    sim_loc.add(sim_loc_final)
+                    raise Exception(f"Specified parameters do not uniquely define simulation. \n Available simulations for specified parameters are: {sim_loc}\n All available parameters are: \n{self.print_available_params_str}")
+        except KeyError:
+            raise Exception(f"Check that provided parameters are in available parameters for plotting. All available parameters are: \n{self.print_available_params_str}")
+            
+
+    def print_available_params(self):
+        for key in self.available_params.keys():
+            attr_name = key.replace(" ", "_")+"_Pow"
+            print(f"-'{key}'. With available values:{' (scaled by 1e%d)' % getattr(self,attr_name) if key in self.scaled_vals else ''} (Data Type: {type(self.available_params[key][0])})")
+            for val in self.available_params[key]:
+                print(f"    ->{val}")
+    
+    def get_value_units_dict_tex(self):
+        val_units = {}
+        for val in self.params_dict.keys():
+            if self.params_dict[val]["unit"]:
+                unit = rf"{{{self.params_dict[val]["unit"]}}}"
+                unit_tex = r"\mathrm" + unit.replace(" ", r"\,")
+            else:
+                unit_tex = None
+            if val in self.scaled_vals:
+                pow_attr_name = val.replace(" ", "_")+"_Pow"
+                val_units[val] = rf"\times 10^{{{getattr(self,pow_attr_name)}}}\,\mathrm{{{unit_tex}}}"
+            else:
+                val_units[val] = unit_tex
+        return val_units
+
+    def get_value_units_dict(self):
+        val_units = {}
+        for val in self.params_dict.keys():
+            if val in self.scaled_vals:
+                pow_attr_name = val.replace(" ", "_")+"_Pow"
+                val_units[val] = f"* 10^{getattr(self,pow_attr_name)} {self.params_dict[val]["unit"]}"
+            else:
+                val_units[val] = self.params_dict[val]["unit"]
+        return val_units
+
+    def plot_simulation_result_vs_attrib(self, result_func: Callable[[Any], float], x_axis: str, curves: str, 
+                       rest_params: dict = {}, attrib_name: str = None, attrib_unit: str = None, x_axis_vals: list = None, curve_vals: list = None,
+                       usetex: bool = True, global_fontsize: float = 18,
+                       use_interp: bool = True, interp_linspace_size: int = 300, show_datapoints: bool = True, lw: float = 2,
+                       plot_figsize : tuple = (10,5), cmap = plt.cm.magma, cmap_min_offset: float = 0, cmap_max_offset: float = 0,
+                       val_units: dict = None, show_legend: bool = True, legend_title: str = None, legend_bbox_to_anchor: tuple = (1.04, 0.5), legend_loc: str = "center left",
+                       left_lim: float = None, right_lim: float = None, bottom_lim: float = 0, top_lim: float = None,
+                       title: str = None, title_pad: float = 20, title_fontsize: float = 20,
+                       xlabel: str = None, xlabel_pad: float = 10, xlabel_fontsize: float = 20,
+                       ylabel: str = None, ylabel_pad: float = 10, ylabel_fontsize: float = 20,
+                       grid: str = "minor", grid_major_linestyle: str = "-", grid_major_linewidth: float = 0.75,
+                       grid_minor_linestyle: str = ":", grid_minor_linewidth: float = 0.5,
+                       savefig: bool = False, output_filename: str = None, dpi: int = 300, show: bool = True, save_folder: str = "./",
+                       returnfig: bool = False, round_xvals: int = 5, round_curvevals: int = 5
+                       ):
+        mpl.rcParams.update(mpl.rcParamsDefault)
+
+        if usetex:
+            plt.rcParams.update({
+                "text.usetex": True,        # Use LaTeX to render all text
+                "font.family": "serif",     # Use serif fonts (Computer Modern is default)
+                "font.serif": ["Computer Modern"],  # Optionally specify which serif font
+                "font.size" : global_fontsize
+            })
+
+            if not val_units:
+                val_units = self.get_value_units_dict_tex()
+            if not legend_title:
+                if val_units[curves]:
+                    legend_title = r"$\begin{array}{c}"+rf"\mathrm{{{curves}}} \\"+r"\left["+val_units[curves]+r"\right]"+r"\end{array}$"
+                else:
+                    legend_title = curves
+
+            if not xlabel:
+                if val_units[x_axis]:
+                    xlabel = f"{x_axis} " + r"$\left[" + val_units[x_axis] + r"\right]$"
+                else:
+                    xlabel = f"{x_axis}"
+            
+            if not ylabel:
+                if attrib_name:
+                    if attrib_unit:
+                        ylabel = f"{attrib_name} " + r"$\left["+attrib_unit+r"\right]$"
+                    else:
+                        ylabel = attrib_name
+                else:
+                    ylabel = None
+
+        else:
+            plt.rcParams.update({
+                "font.size" : global_fontsize
+            })
+            if not val_units:
+                val_units = self.get_value_units_dict()
+            if not legend_title:
+                if val_units[curves]:
+                    legend_title = f"{curves}\n [{val_units[curves]}]"
+                else:
+                    legend_title = curves
+            
+            if not xlabel:
+                if val_units[x_axis]:
+                    xlabel = f"{x_axis} " + "[" + val_units[x_axis] + "]"
+                else:
+                    xlabel = f"{x_axis}"
+            
+            if not ylabel:
+                if attrib_name:
+                    if attrib_unit:
+                        ylabel = f"{attrib_name} [{attrib_unit}]"
+                    else:
+                        ylabel = attrib_name
+                else:
+                    ylabel = None
+                    
+
+        total_params_list = list(self.available_params.keys())
+        if x_axis not in total_params_list or curves not in total_params_list:
+            raise ValueError(f"Provided variables not in available values for plotting. \n All available parameters are:\n {self.print_available_params_str}")
+        if not (isinstance(self.available_params[x_axis][0], float) or isinstance(self.available_params[x_axis][0], int)):
+            raise ValueError("Values on x_axis cannot be non numeric")
+        
+        if x_axis_vals is None:
+            x_axis_vals = self.available_params[x_axis]
+        if curve_vals is None:
+            curve_vals = self.available_params[curves]
+        
+        fig = plt.figure(figsize=plot_figsize)
+        norm = mcolors.Normalize(vmin=min(curve_vals)+cmap_min_offset, vmax=max(curve_vals)+cmap_max_offset)
+
+        for curve_val in curve_vals:
+            curve_val = round(curve_val, round_curvevals)
+            attrib_vals = []
+            x_axis_vals_plot = []
+            for x_axis_val in x_axis_vals:
+                x_axis_val = round(x_axis_val, round_xvals)
+                sim_params = rest_params.copy()
+                sim_params[x_axis] = x_axis_val
+                sim_params[curves] = curve_val
+                try:
+                    sim = self.get_simulation(sim_params, is_internal = True)
+                except Exception:
+                    raise ValueError(f"Parameters must uniquely define simulations. rest_params has current value {rest_params}. Ensure that all parameters not included in 'x_axis' and 'curves' are specified. \n All available parameters are:'\n{self.print_available_params_str}")
+                if sim:
+                    attrib_vals.append(result_func(sim))
+                    x_axis_vals_plot.append(x_axis_val)
+
+            if len(attrib_vals) > 0:
+                if use_interp:
+                    pchip = PchipInterpolator(x_axis_vals, attrib_vals)
+                    xx = np.linspace(min(x_axis_vals), max(x_axis_vals), interp_linspace_size)
+                    yy = pchip(xx)
+                    if show_datapoints:
+                        plt.plot(x_axis_vals,attrib_vals,".",lw = lw+1, color = cmap(norm(curve_val)))
+                    plt.plot(xx,yy, lw = lw,label=f"{curve_val}", color = cmap(norm(curve_val)))
+                else:
+                    plt.plot(x_axis_vals,attrib_vals,lw = lw,label=f"{curve_val}", color = cmap(norm(curve_val)))
+                    if show_datapoints:
+                        plt.plot(x_axis_vals,attrib_vals,".",lw= lw + 1, color = cmap(norm(curve_val)))
+        
+        if title:
+            plt.title(title, pad=title_pad, fontsize=title_fontsize)
+        if xlabel:
+            plt.xlabel(xlabel, labelpad=xlabel_pad, fontsize=xlabel_fontsize)
+        if ylabel:
+            plt.ylabel(ylabel, labelpad=ylabel_pad, fontsize=ylabel_fontsize)
+        if show_legend:
+            plt.legend(bbox_to_anchor=legend_bbox_to_anchor, loc=legend_loc).set_title(legend_title)
+        
+        plt.tight_layout()
+        plt.xlim(left = left_lim, right = right_lim)
+        plt.ylim(bottom = bottom_lim, top = top_lim)
+        if grid == "major":
+            plt.grid(which='major', linestyle=grid_major_linestyle, linewidth=grid_major_linewidth)
+        if grid == "minor":
+            plt.minorticks_on()
+            plt.grid(which='major', linestyle=grid_major_linestyle, linewidth=grid_major_linewidth)
+            plt.grid(which='minor', linestyle=grid_minor_linestyle, linewidth=grid_minor_linewidth)
+
+        if returnfig:
+            return fig
+        if savefig:
+            if output_filename:
+                plt.savefig(os.path.join(save_folder,output_filename), dpi = dpi)
+            else:
+                plt.savefig(os.path.join(save_folder,f"plot_{time()}.png"), dpi = dpi)
+        if show:
+            plt.show()
+    
+    def plot_heat_load(self, x_axis: str, curves: str, rest_params: dict = {}, x_axis_vals: list = None, curve_vals: list = None,
+                       T_rev: float = 88.9e-6, unit: str = "mW", usetex: bool = True, global_fontsize: float = 18,
+                       use_interp: bool = True, interp_linspace_size: int = 300, show_datapoints: bool = True, lw: float = 2,
+                       plot_figsize : tuple = (10,5), cmap = plt.cm.magma, cmap_min_offset: float = 0, cmap_max_offset: float = 0.3,
+                       val_units: dict = None, show_legend: bool = True, legend_title: str = None, legend_bbox_to_anchor: tuple = (1.04, 0.5), legend_loc: str = "center left",
+                       left_lim: float = None, right_lim: float = None, bottom_lim: float = 0, top_lim: float = None,
+                       title: str = None, title_pad: float = 20, title_fontsize: float = 20,
+                       xlabel: str = None, xlabel_pad: float = 10, xlabel_fontsize: float = 20,
+                       ylabel: str = None, ylabel_pad: float = 10, ylabel_fontsize: float = 20,
+                       grid: str = "minor", grid_major_linestyle: str = "-", grid_major_linewidth: float = 0.75,
+                       grid_minor_linestyle: str = ":", grid_minor_linewidth: float = 0.5,
+                       savefig: bool = False, output_filename: str = "heat_load.png", dpi: int = 300, show: bool = True, save_folder: str = "./",
+                       returnfig: bool = False, round_xvals: int = 5, round_curvevals: int = 5
+                       ):
+
+        dispunit = {
+            "mW" : "mW",
+            "W"  : "W",
+            "eV" : "eV/s"
+        }
+        
+        if not title:
+            title = f"Heat load per bunch and unit length as a function of {x_axis} and {curves}"
+        if not ylabel:
+            ylabel = f"Heat load [{dispunit[unit]}/m/bunch]"
+        
+        def heat_load_func(sim, T_rev = T_rev, unit = unit):
+            return sim.calculate_heat_load_per_bunch(T_rev = T_rev, unit = unit)
+
+        self.plot_simulation_result_vs_attrib(heat_load_func, x_axis, curves, rest_params = rest_params , x_axis_vals = x_axis_vals, curve_vals = curve_vals,
+                       usetex = usetex, global_fontsize = global_fontsize,
+                       use_interp = use_interp, interp_linspace_size = interp_linspace_size, show_datapoints = show_datapoints, lw = lw,
+                       plot_figsize = plot_figsize, cmap = cmap, cmap_min_offset = cmap_min_offset, cmap_max_offset = cmap_max_offset,
+                       val_units = val_units, show_legend = show_legend, legend_title = legend_title, legend_bbox_to_anchor = legend_bbox_to_anchor, legend_loc = legend_loc,
+                       left_lim = left_lim, right_lim = right_lim, bottom_lim = bottom_lim, top_lim = top_lim,
+                       title = title, title_pad = title_pad, title_fontsize = title_fontsize,
+                       xlabel = xlabel, xlabel_pad = xlabel_pad, xlabel_fontsize = xlabel_fontsize,
+                       ylabel = ylabel, ylabel_pad = ylabel_pad, ylabel_fontsize = ylabel_fontsize,
+                       grid = grid, grid_major_linestyle = grid_major_linestyle, grid_major_linewidth = grid_major_linewidth,
+                       grid_minor_linestyle = grid_minor_linestyle, grid_minor_linewidth = grid_minor_linewidth,
+                       savefig = savefig, output_filename = output_filename, dpi = dpi, show = show, save_folder = save_folder,
+                       returnfig = returnfig, round_xvals = round_xvals, round_curvevals = round_curvevals
+                       )
+    
+    def plot_max_cen_density(self, x_axis: str, curves: str, rest_params: dict = {}, x_axis_vals: list = None, curve_vals: list = None,
+                            usetex: bool = True, global_fontsize: float = 15,
+                            use_interp: bool = True, interp_linspace_size: int = 300, show_datapoints: bool = True, lw: float = 2,
+                            plot_figsize : tuple = (8,5), cmap = plt.cm.magma, cmap_min_offset: float = 0, cmap_max_offset: float = 0,
+                            val_units: dict = None, show_legend: bool = True, legend_title: str = None, legend_bbox_to_anchor: tuple = (1.04, 0.5), legend_loc: str = "center left",
+                            left_lim: float = None, right_lim: float = None, bottom_lim: float = 5*10**9, top_lim: float = None,
+                            title: str = None, title_pad: float = 50, title_fontsize: float = 20,
+                            xlabel: str = None, xlabel_pad: float = 10, xlabel_fontsize: float = 20,
+                            ylabel: str = None, ylabel_pad: float = 15, ylabel_fontsize: float = 20,
+                            grid: str = "minor", grid_major_linestyle: str = "-", grid_major_linewidth: float = 0.75,
+                            grid_minor_linestyle: str = ":", grid_minor_linewidth: float = 0.5,
+                            savefig: bool = False, output_filename: str = "heat_load.png", dpi: int = 300, show: bool = True, save_folder: str = "./",
+                            returnfig: bool = False, round_xvals: int = 5, round_curvevals: int = 5
+                            ):
+        if usetex:            
+            if not ylabel:
+                ylabel = r"Max Central Electron Density [$ \rm m^{-3}$]"
+
+        else:
+            if not ylabel:
+                ylabel = f"Max Central Electron Density [m^-3]"
+
+        if not title:
+            title = f"Max Central Electron Density as a function of {x_axis} and {curves}"
+        
+        def calculate_max_cen_density(sim):
+            return max(sim.cen_density)
+
+        fig = self.plot_simulation_result_vs_attrib(calculate_max_cen_density, x_axis, curves, rest_params = rest_params , x_axis_vals = x_axis_vals, curve_vals = curve_vals,
+                       usetex = usetex, global_fontsize = global_fontsize,
+                       use_interp = use_interp, interp_linspace_size = interp_linspace_size, show_datapoints = show_datapoints, lw = lw,
+                       plot_figsize = plot_figsize, cmap = cmap, cmap_min_offset = cmap_min_offset, cmap_max_offset = cmap_max_offset,
+                       val_units = val_units, show_legend = show_legend, legend_title = legend_title, legend_bbox_to_anchor = legend_bbox_to_anchor, legend_loc = legend_loc,
+                       left_lim = left_lim, right_lim = right_lim, bottom_lim = bottom_lim, top_lim = top_lim,
+                       title = title, title_pad = title_pad, title_fontsize = title_fontsize,
+                       xlabel = xlabel, xlabel_pad = xlabel_pad, xlabel_fontsize = xlabel_fontsize,
+                       ylabel = ylabel, ylabel_pad = ylabel_pad, ylabel_fontsize = ylabel_fontsize,
+                       grid = grid, grid_major_linestyle = grid_major_linestyle, grid_major_linewidth = grid_major_linewidth,
+                       grid_minor_linestyle = grid_minor_linestyle, grid_minor_linewidth = grid_minor_linewidth,
+                       savefig = False, output_filename = output_filename, dpi = dpi, show = False, save_folder = save_folder,
+                       returnfig = True, round_xvals = round_xvals, round_curvevals = round_curvevals
+                       )
+        
+        plt.semilogy()
+        plt.tight_layout()
+        
+        if returnfig:
+            return fig
+        if savefig:
+            if output_filename:
+                plt.savefig(os.path.join(save_folder,output_filename), dpi = dpi)
+            else:
+                plt.savefig(os.path.join(save_folder,f"max_cen_density.png"), dpi = dpi)
+        if show:
+            plt.show()
+        
+    def plot_simulation_attribs(self, x_axis_attrib: Union[str, Callable[[Any], list[float]]] ,y_axis_attrib : Union[str, Callable[[Any], list[float]]], curves : str = None, 
+                                rest_params: dict = {}, curve_vals: list = None, usetex: bool = True, global_fontsize: float = 18,
+                                use_interp: bool = True, interp_linspace_size: int = 300, show_datapoints: bool = True, lw: float = 2,
+                                plot_figsize : tuple = (10,5), cmap = plt.cm.magma, cmap_min_offset: float = 0, cmap_max_offset: float = 0,
+                                val_units: dict = None, show_legend: bool = True, legend_title: str = None, legend_bbox_to_anchor: tuple = (1.04, 0.5), legend_loc: str = "center left",
+                                left_lim: float = None, right_lim: float = None, bottom_lim: float = None, top_lim: float = None,
+                                title: str = None, title_pad: float = 20, title_fontsize: float = 20,
+                                xlabel: str = None, xlabel_pad: float = 10, xlabel_fontsize: float = 20,
+                                ylabel: str = None, ylabel_pad: float = 10, ylabel_fontsize: float = 20,
+                                grid: str = "minor", grid_major_linestyle: str = "-", grid_major_linewidth: float = 0.75,
+                                grid_minor_linestyle: str = ":", grid_minor_linewidth: float = 0.5,
+                                savefig: bool = False, output_filename: str = None, dpi: int = 300, show: bool = True, save_folder: str = "./",
+                                returnfig: bool = False, round_curvevals: int = 5
+                                ):
+        '''if isinstance(x, str):
+            x_val = getattr(sim, x)
+        elif callable(x):
+            x_val = x(sim)
+        else:
+            raise TypeError("x must be a string or a callable")'''
+        mpl.rcParams.update(mpl.rcParamsDefault)
+
+        def get_attrib(x: Union[str, Callable[[Any], list[float]]], sim):
+            if isinstance(x, str):
+                return getattr(sim, x)
+            elif callable(x):
+                return x(sim)
+            else:
+                raise TypeError("x must be a string or a callable")
+        
+        def get_attrib_name(x: Union[str, Callable[[Any], list[float]]]):
+            if isinstance(x, str):
+                return x
+            elif callable(x):
+                return x.__name__
+            else:
+                raise TypeError("x must be a string or a callable")
+        
+        if usetex:
+            plt.rcParams.update({
+                "text.usetex": True,        # Use LaTeX to render all text
+                "font.family": "serif",     # Use serif fonts (Computer Modern is default)
+                "font.serif": ["Computer Modern"],  # Optionally specify which serif font
+                "font.size" : global_fontsize
+            })
+
+            if not val_units:
+                val_units = self.get_value_units_dict_tex()
+            if not legend_title:
+                if val_units[curves]:
+                    legend_title = r"$\begin{array}{c}"+rf"\mathrm{{{curves}}} \\"+r"\left["+val_units[curves]+r"\right]"+r"\end{array}$"
+                else:
+                    legend_title = curves
+        else:
+            plt.rcParams.update({
+                "font.size" : global_fontsize
+            })
+            if not val_units:
+                val_units = self.get_value_units_dict()
+            if not legend_title:
+                if val_units[curves]:
+                    legend_title = f"{curves}\n [{val_units[curves]}]"
+                else:
+                    legend_title = curves
+
+        if not xlabel:
+            xlabel = get_attrib_name(x_axis_attrib)
+        if not ylabel:
+            ylabel = get_attrib_name(y_axis_attrib)
+
+        total_params_list = list(self.available_params.keys())
+        if curves:
+            if curves in self.sims_per_parameter.keys():
+                if not (curves in total_params_list):
+                    ValueError(f"'curves' must be iterable. (In available parameters for plotting: {self.print_available_params_str})")
+            else:
+                ValueError(f"Parameter {curves} not in list of tracked parameters.")
+            if curve_vals is None:
+                curve_vals = self.available_params[curves]
+            
+            fig = plt.figure(figsize=plot_figsize)
+            norm = mcolors.Normalize(vmin=min(curve_vals)+cmap_min_offset, vmax=max(curve_vals)+cmap_max_offset)
+
+            for curve_val in curve_vals:
+                curve_val = round(curve_val, round_curvevals)
+                sim_params = rest_params.copy()
+                sim_params[curves] = curve_val
+                try:
+                    sim = self.get_simulation(sim_params, is_internal = True)
+                except Exception:
+                    raise ValueError(f"Parameters must uniquely define simulations. rest_params has current value {rest_params}. Ensure that all parameters not included in 'curves' are specified. \n All available parameters are:'\n{self.print_available_params_str}")
+                if sim:
+                    x_axis_vals = get_attrib(x_axis_attrib, sim)
+                    y_axis_vals = get_attrib(y_axis_attrib, sim)
+                    if use_interp:
+                        pchip = PchipInterpolator(x_axis_vals, y_axis_vals)
+                        xx = np.linspace(min(x_axis_vals), max(x_axis_vals), interp_linspace_size)
+                        yy = pchip(xx)
+                        if show_datapoints:
+                            plt.plot(x_axis_vals,y_axis_vals,".",lw = lw+1, color = cmap(norm(curve_val)))
+                        plt.plot(xx,yy, lw = lw,label=f"{curve_val}", color = cmap(norm(curve_val)))
+                    else:
+                        plt.plot(x_axis_vals,y_axis_vals,lw = lw,label=f"{curve_val}", color = cmap(norm(curve_val)))
+                        if show_datapoints:
+                            plt.plot(x_axis_vals,y_axis_vals,".",lw= lw + 1, color = cmap(norm(curve_val)))
+        else:
+            pass
+
+        if title:
+            plt.title(title, pad=title_pad, fontsize=title_fontsize)
+        if xlabel:
+            plt.xlabel(xlabel, labelpad=xlabel_pad, fontsize=xlabel_fontsize)
+        if ylabel:
+            plt.ylabel(ylabel, labelpad=ylabel_pad, fontsize=ylabel_fontsize)
+        if show_legend:
+            plt.legend(bbox_to_anchor=legend_bbox_to_anchor, loc=legend_loc).set_title(legend_title)
+        
+        plt.tight_layout()
+        plt.xlim(left = left_lim, right = right_lim)
+        plt.ylim(bottom = bottom_lim, top = top_lim)
+
+        if grid == "major":
+            plt.grid(which='major', linestyle=grid_major_linestyle, linewidth=grid_major_linewidth)
+        if grid == "minor":
+            plt.minorticks_on()
+            plt.grid(which='major', linestyle=grid_major_linestyle, linewidth=grid_major_linewidth)
+            plt.grid(which='minor', linestyle=grid_minor_linestyle, linewidth=grid_minor_linewidth)
+
+        if returnfig:
+            return fig
+        if savefig:
+            if output_filename:
+                plt.savefig(os.path.join(save_folder,output_filename), dpi = dpi)
+            else:
+                plt.savefig(os.path.join(save_folder,f"plot_{time()}.png"), dpi = dpi)
+        if show:
+            plt.show()

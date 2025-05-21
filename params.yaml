@@ -1,0 +1,32 @@
+SEY:
+  var_name : del_max
+  dtype : float
+  convert_to_pow : False
+  unit : 
+
+Intensity :
+  var_name : fact_beam
+  dtype : float
+  convert_to_pow : True
+  unit : "ppb"
+
+Magnet Configuration :
+  var_name : B_multip
+  dtype : str
+  unit : "T"
+
+Beam Filling Pattern :
+  var_name : filling_pattern_file
+  dtype : str
+  unit : "Bunch Lengths"
+
+Photoemission Enabled :
+  var_name : photoem_flag
+  dtype : bool
+  unit : 
+
+Beam Energy :
+  var_name : energy_eV
+  dtype : float
+  convert_to_pow : True
+  unit : "eV"
