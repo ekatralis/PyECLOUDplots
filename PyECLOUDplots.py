@@ -208,11 +208,30 @@ class PyECLOUDsim:
         n_sep_trains = params[6]
         train_length = n_reps_inside_train*(n_filled+n_empty) + n_sep_trains
         if train_num == -1:
-            return ((n_trains-1)*train_length) - 1
+            train_num = n_trains
         else:
             if train_num > n_trains:
                 raise ValueError("Train index must not exceed number of total trains. Trains are considered 1-indexed")
-            return ((train_num-1)*train_length) - 1
+        return ((train_num-1)*train_length) - 1
+    
+    def get_i_train_n_last_passages(self, n_indices: int = 6, train_num = -1):
+        '''
+        Get the indices for the last n bunch passages for the i-th train. If unspecified, the indices for the last train is returned.
+        '''
+        params = self.extract_beam_params()
+        n_trains = params[0]
+        n_reps_inside_train = params[1]
+        n_filled = params[2]
+        n_empty = params[4]
+        n_sep_trains = params[6]
+        train_length = n_reps_inside_train*(n_filled+n_empty) + n_sep_trains
+        if train_num == -1:
+            train_num = n_trains
+        else:
+            if train_num > n_trains:
+                raise ValueError("Train index must not exceed number of total trains. Trains are considered 1-indexed")
+        last_idx = ((train_num)*train_length) - n_sep_trains - n_empty
+        return (last_idx - n_indices, last_idx)
     
     def get_i_train_timestep_idx(self, train_num = -1):
         '''
@@ -230,11 +249,11 @@ class PyECLOUDsim:
         num_chunks = reference_bunch_list.shape[0]
         chunk_size = reference_timestep_list.shape[0] / num_chunks
         if train_num == -1:
-            return int((((n_trains-1)*train_length))*chunk_size - 1)
+            train_num = n_trains
         else:
             if train_num > n_trains:
                 raise ValueError("Train index must not exceed number of total trains. Trains are considered 1-indexed")
-            return int((((train_num-1)*train_length))*chunk_size - 1)
+        return int((((train_num-1)*train_length))*chunk_size - 1)
 
     def timestep_list_to_bunch_list(self, list_to_be_rescaled, mode="sum"):
         '''
@@ -456,7 +475,7 @@ class PyECLOUDParameterScan:
         return yaml_dict
 
     def plot_simulation_result_vs_attrib(self, result_func: Callable[[Any], float], x_axis: str, curves: Union[str, dict], 
-                       constant_params: dict = {}, attrib_name: str = None, attrib_unit: str = None, x_axis_vals: list = None, curve_vals: list = None,
+                       common_params: dict = {}, attrib_name: str = None, attrib_unit: str = None, x_axis_vals: list = None, curve_vals: list = None,
                        usetex: bool = True, global_fontsize: float = 18,
                        use_interp: bool = True, interp_linspace_size: int = 300, show_datapoints: bool = True, lw: float = 2,
                        plot_figsize : tuple = (10,5), cmap = plt.cm.magma, cmap_min_offset: float = 0, cmap_max_offset: float = 0 ,
@@ -564,11 +583,11 @@ class PyECLOUDParameterScan:
             for x_axis_val in x_axis_vals:
                 x_axis_val = round(x_axis_val, round_xvals)
                 curve_params[x_axis] = x_axis_val
-                sim_params = constant_params | curve_params
+                sim_params = common_params | curve_params
                 try:
                     sim = self.get_simulation(sim_params, is_internal = True)
-                except Exception:
-                    raise ValueError(f"Parameters must uniquely define simulations. constant_params has current value {constant_params}. Ensure that all parameters not included in 'x_axis' and 'curves' are specified. \n All available parameters are:'\n{self.print_available_params_str}")
+                except Exception as e:
+                    raise ValueError(f"Parameters must uniquely define simulations. common_params has current value {common_params}. Ensure that all parameters not included in 'x_axis' and 'curves' are specified.") from e
                 if sim:
                     attrib_vals.append(result_func(sim))
                     x_axis_vals_plot.append(x_axis_val)
@@ -634,7 +653,7 @@ class PyECLOUDParameterScan:
         if show:
             plt.show()
     
-    def plot_heat_load(self, x_axis: str, curves: Union[str, dict], constant_params: dict = {}, x_axis_vals: list = None, curve_vals: list = None,
+    def plot_heat_load(self, x_axis: str, curves: Union[str, dict], common_params: dict = {}, x_axis_vals: list = None, curve_vals: list = None,
                        T_rev: float = 88.9e-6, unit: str = "mW", usetex: bool = True, global_fontsize: float = 18,
                        use_interp: bool = True, interp_linspace_size: int = 300, show_datapoints: bool = True, lw: float = 2,
                        plot_figsize : tuple = (10,5), cmap = plt.cm.magma, cmap_min_offset: float = 0, cmap_max_offset: float = 0,
@@ -666,7 +685,7 @@ class PyECLOUDParameterScan:
         def heat_load_func(sim, T_rev = T_rev, unit = unit):
             return sim.calculate_heat_load_per_bunch(T_rev = T_rev, unit = unit)
 
-        self.plot_simulation_result_vs_attrib(heat_load_func, x_axis, curves, constant_params = constant_params , x_axis_vals = x_axis_vals, curve_vals = curve_vals,
+        self.plot_simulation_result_vs_attrib(heat_load_func, x_axis, curves, common_params = common_params , x_axis_vals = x_axis_vals, curve_vals = curve_vals,
                        usetex = usetex, global_fontsize = global_fontsize,
                        use_interp = use_interp, interp_linspace_size = interp_linspace_size, show_datapoints = show_datapoints, lw = lw,
                        plot_figsize = plot_figsize, cmap = cmap, cmap_min_offset = cmap_min_offset, cmap_max_offset = cmap_max_offset,
@@ -681,7 +700,7 @@ class PyECLOUDParameterScan:
                        returnfig = returnfig, round_xvals = round_xvals, round_curvevals = round_curvevals
                        )
     
-    def plot_max_cen_density(self, x_axis: str, curves: str, constant_params: dict = {}, x_axis_vals: list = None, curve_vals: list = None,
+    def plot_max_cen_density(self, x_axis: str, curves: str, common_params: dict = {}, x_axis_vals: list = None, curve_vals: list = None,
                             usetex: bool = True, global_fontsize: float = 15,
                             use_interp: bool = True, interp_linspace_size: int = 300, show_datapoints: bool = True, lw: float = 2,
                             plot_figsize : tuple = (8,5), cmap = plt.cm.magma, cmap_min_offset: float = 0, cmap_max_offset: float = 0,
@@ -692,7 +711,7 @@ class PyECLOUDParameterScan:
                             ylabel: str = None, ylabel_pad: float = 15, ylabel_fontsize: float = 20,
                             grid: str = "minor", grid_major_linestyle: str = "-", grid_major_linewidth: float = 0.75,
                             grid_minor_linestyle: str = ":", grid_minor_linewidth: float = 0.5,
-                            savefig: bool = False, output_filename: str = "heat_load.png", dpi: int = 300, show: bool = True, save_folder: str = "./",
+                            savefig: bool = False, output_filename: str = "max_cen_density.png", dpi: int = 300, show: bool = True, save_folder: str = "./",
                             returnfig: bool = False, round_xvals: int = 5, round_curvevals: int = 5
                             ):
         if usetex:            
@@ -709,7 +728,7 @@ class PyECLOUDParameterScan:
         def calculate_max_cen_density(sim):
             return max(sim.cen_density)
 
-        fig = self.plot_simulation_result_vs_attrib(calculate_max_cen_density, x_axis, curves, constant_params = constant_params , x_axis_vals = x_axis_vals, curve_vals = curve_vals,
+        fig = self.plot_simulation_result_vs_attrib(calculate_max_cen_density, x_axis, curves, common_params = common_params , x_axis_vals = x_axis_vals, curve_vals = curve_vals,
                        usetex = usetex, global_fontsize = global_fontsize,
                        use_interp = use_interp, interp_linspace_size = interp_linspace_size, show_datapoints = show_datapoints, lw = lw,
                        plot_figsize = plot_figsize, cmap = cmap, cmap_min_offset = cmap_min_offset, cmap_max_offset = cmap_max_offset,
@@ -730,15 +749,12 @@ class PyECLOUDParameterScan:
         if returnfig:
             return fig
         if savefig:
-            if output_filename:
-                plt.savefig(os.path.join(save_folder,output_filename), dpi = dpi)
-            else:
-                plt.savefig(os.path.join(save_folder,f"max_cen_density.png"), dpi = dpi)
+            plt.savefig(os.path.join(save_folder,output_filename), dpi = dpi)
         if show:
             plt.show()
         
-    def plot_simulation_attribs(self, x_axis_attrib: Union[str, Callable[[Any], list[float]]] ,y_axis_attrib : Union[str, Callable[[Any], list[float]]], curves : str = None, 
-                                rest_params: dict = {}, curve_vals: list = None, usetex: bool = True, global_fontsize: float = 18,
+    def plot_simulation_attribs(self, x_axis_attrib: Union[str, Callable[[Any], list[float]]] ,y_axis_attrib : Union[str, Callable[[Any], list[float]]], curves : Union[str, dict] = None, 
+                                common_params: dict = {}, curve_vals: list = None, usetex: bool = True, global_fontsize: float = 18,
                                 use_interp: bool = True, interp_linspace_size: int = 300, show_datapoints: bool = True, lw: float = 2,
                                 plot_figsize : tuple = (10,5), cmap = plt.cm.magma, cmap_min_offset: float = 0, cmap_max_offset: float = 0,
                                 val_units: dict = None, show_legend: bool = True, legend_title: str = None, legend_bbox_to_anchor: tuple = (1.04, 0.5), legend_loc: str = "center left",
@@ -774,7 +790,33 @@ class PyECLOUDParameterScan:
                 return x.__name__
             else:
                 raise TypeError("x must be a string or a callable")
-        
+        if curves is not None:
+            curves_dict = {}
+            if isinstance(curves,str):
+                if curves.endswith(".yaml"):
+                    curves_dict = self.read_yaml_to_dict(curves)
+                    curves_is_str = False
+                else:
+                    if curves in self.sims_per_parameter.keys():
+                        if not (curves in self.available_params.keys()):
+                            ValueError(f"'curves' must be iterable. (In available parameters for plotting: {self.print_available_params_str})")
+                    else:
+                        ValueError(f"Parameter {curves} not in list of tracked parameters.")
+                    if curve_vals is None:
+                        curve_vals = self.available_params[curves]
+                        curves_dict = {v: {curves : v} for v in curve_vals}
+                    else:
+                        curves_dict = {round(v, round_curvevals): {curves : round(v, round_curvevals)} for v in curve_vals}
+                    curves_is_str = True
+            elif isinstance(curves,dict):
+                if curve_vals:
+                    raise ValueError("If curve_vals is specified, 'curves' must uniquely define a parameter that can be iterable")
+                curves_dict = curves
+                curves_is_str = False
+            else:
+                raise ValueError("'curves' must either define a specific parameter as 'str' or a group of parameters as 'dict'")
+        else:
+            curves_is_str = False
         if usetex:
             plt.rcParams.update({
                 "text.usetex": True,        # Use LaTeX to render all text
@@ -785,7 +827,7 @@ class PyECLOUDParameterScan:
 
             if not val_units:
                 val_units = self.get_value_units_dict_tex()
-            if not legend_title:
+            if not legend_title and curves_is_str:
                 if val_units[curves]:
                     legend_title = r"$\begin{array}{c}"+rf"\mathrm{{{curves}}} \\"+r"\left["+val_units[curves]+r"\right]"+r"\end{array}$"
                 else:
@@ -796,7 +838,7 @@ class PyECLOUDParameterScan:
             })
             if not val_units:
                 val_units = self.get_value_units_dict()
-            if not legend_title:
+            if not legend_title and curves_is_str:
                 if val_units[curves]:
                     legend_title = f"{curves}\n [{val_units[curves]}]"
                 else:
@@ -807,41 +849,49 @@ class PyECLOUDParameterScan:
         if not ylabel:
             ylabel = get_attrib_name(y_axis_attrib)
 
-        total_params_list = list(self.available_params.keys())
-        if curves:
-            if curves in self.sims_per_parameter.keys():
-                if not (curves in total_params_list):
-                    ValueError(f"'curves' must be iterable. (In available parameters for plotting: {self.print_available_params_str})")
-            else:
-                ValueError(f"Parameter {curves} not in list of tracked parameters.")
-            if curve_vals is None:
-                curve_vals = self.available_params[curves]
-            
+        if curves is not None:
             fig = plt.figure(figsize=plot_figsize)
-            norm = mcolors.Normalize(vmin=min(curve_vals)+cmap_min_offset, vmax=max(curve_vals)+cmap_max_offset)
-
-            for curve_val in curve_vals:
-                curve_val = round(curve_val, round_curvevals)
-                sim_params = rest_params.copy()
-                sim_params[curves] = curve_val
+            curves_to_plot = {}
+            for curve_name, curve_params in curves_dict.items():
+                sim_params = common_params | curve_params
                 try:
                     sim = self.get_simulation(sim_params, is_internal = True)
-                except Exception:
-                    raise ValueError(f"Parameters must uniquely define simulations. rest_params has current value {rest_params}. Ensure that all parameters not included in 'curves' are specified. \n All available parameters are:'\n{self.print_available_params_str}")
+                except Exception as e:
+                    raise ValueError(f"Parameters must uniquely define simulations. common_params has current value {common_params}. Ensure that all parameters not included in 'x_axis' and 'curves' are specified.") from e
                 if sim:
                     x_axis_vals = get_attrib(x_axis_attrib, sim)
                     y_axis_vals = get_attrib(y_axis_attrib, sim)
-                    if use_interp:
-                        pchip = PchipInterpolator(x_axis_vals, y_axis_vals)
-                        xx = np.linspace(min(x_axis_vals), max(x_axis_vals), interp_linspace_size)
-                        yy = pchip(xx)
-                        if show_datapoints:
-                            plt.plot(x_axis_vals,y_axis_vals,".",lw = lw+1, color = cmap(norm(curve_val)))
-                        plt.plot(xx,yy, lw = lw,label=f"{curve_val}", color = cmap(norm(curve_val)))
-                    else:
-                        plt.plot(x_axis_vals,y_axis_vals,lw = lw,label=f"{curve_val}", color = cmap(norm(curve_val)))
-                        if show_datapoints:
-                            plt.plot(x_axis_vals,y_axis_vals,".",lw= lw + 1, color = cmap(norm(curve_val)))
+                    curves_to_plot[curve_name] = {
+                        "x"     : x_axis_vals,
+                        "y"     : y_axis_vals,
+                        "avg"   : np.mean(y_axis_vals)
+                    }
+
+            if curves_is_str and (isinstance(curve_vals[0],float) or isinstance(curve_vals[0],int)):
+                norm = mcolors.Normalize(vmin=min(curve_vals) + cmap_min_offset, vmax=max(curve_vals) + cmap_max_offset)
+                for curve_name, data in curves_to_plot.items():
+                    data["color"] = cmap(norm(curve_name))
+            else:
+                all_avgs = [d["avg"] for d in curves_to_plot.values()]
+                norm = mcolors.Normalize(vmin=min(all_avgs) + cmap_min_offset, vmax=max(all_avgs) + cmap_max_offset)
+                for curve_name, data in curves_to_plot.items():
+                    data["color"] = cmap(norm(data["avg"]))
+
+            for curve_name, curve_data in curves_to_plot.items():
+                x = curve_data["x"]
+                y = curve_data["y"]
+                plt_color = curve_data["color"]
+                if use_interp:
+                    pchip = PchipInterpolator(x, y)
+                    xx = np.linspace(min(x), max(x), interp_linspace_size)
+                    yy = pchip(xx)
+                    if show_datapoints:
+                        plt.plot(x,y,".",lw = lw+1, color = plt_color)
+                    plt.plot(xx,yy, lw = lw,label=f"{curve_name}", color = plt_color)
+                else:
+                    plt.plot(x,y,lw = lw,label=f"{curve_name}", color = plt_color)
+                    if show_datapoints:
+                        plt.plot(x,y,".",lw= lw + 1, color = plt_color)
         else:
             pass
 
