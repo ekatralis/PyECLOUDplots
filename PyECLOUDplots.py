@@ -398,14 +398,25 @@ class PyECLOUDParameterScan:
                 n_sims += 1
         return n_sims
     
-    def get_simulation(self, sim_params: dict, is_internal: bool = False):
+    def get_simulation(self, sim_params: Union[str, dict], is_internal: bool = False):
         '''
         Find simulations with desired parameters. 
 
         Parameters:
-            - sim_params:   Dictionary containing parameters of the desired simulation
+            - sim_params:   Dictionary or link to .yaml file containing parameters of the desired simulation 
             - is_internal:  Not to be used. Determines whether an error is returned for non-existent simulations and supresses output
         '''
+
+        if isinstance(sim_params, str):
+            if sim_params.endswith(".yaml"):
+                sim_params = self.read_yaml_to_dict(sim_params)
+            else:
+                raise ValueError("sim_params can either be a .yaml file or a dict")
+        elif isinstance(sim_params, dict):
+            pass
+        else:
+            raise ValueError("sim_params can either be a .yaml file or a dict")
+        
         scan_params = list(sim_params.keys())
         param_num = len(scan_params)
         try:
@@ -893,7 +904,24 @@ class PyECLOUDParameterScan:
                     if show_datapoints:
                         plt.plot(x,y,".",lw= lw + 1, color = plt_color)
         else:
-            pass
+            try:
+                sim = self.get_simulation(common_params, is_internal = True)
+            except Exception as e:
+                raise ValueError(f"Parameters must uniquely define simulations. common_params has current value {common_params}. Ensure that all parameters not included in 'x_axis' and 'curves' are specified.") from e
+            if sim:
+                if use_interp:
+                    x = get_attrib(x_axis_attrib, sim)
+                    y = get_attrib(y_axis_attrib, sim)
+                    pchip = PchipInterpolator(x, y)
+                    xx = np.linspace(min(x), max(x), interp_linspace_size)
+                    yy = pchip(xx)
+                    if show_datapoints:
+                        plt.plot(x,y,".",lw = lw+1, color = "k")
+                    plt.plot(xx,yy, lw = lw, color = "k")
+                else:
+                    plt.plot(x,y,lw = lw, color = "k")
+                    if show_datapoints:
+                        plt.plot(x,y,".",lw= lw + 1, color = "k")
 
         if title:
             plt.title(title, pad=title_pad, fontsize=title_fontsize)
@@ -901,7 +929,7 @@ class PyECLOUDParameterScan:
             plt.xlabel(xlabel, labelpad=xlabel_pad, fontsize=xlabel_fontsize)
         if ylabel:
             plt.ylabel(ylabel, labelpad=ylabel_pad, fontsize=ylabel_fontsize)
-        if show_legend:
+        if show_legend and curves is not None:
             plt.legend(bbox_to_anchor=legend_bbox_to_anchor, loc=legend_loc).set_title(legend_title)
         
         plt.tight_layout()
