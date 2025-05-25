@@ -312,6 +312,14 @@ class PyECLOUDsim:
         bunch_num_in_train = n_reps_inside_train*n_filled
 
         return float(unit_multiplier[unit]*np.sum(self.sim_data.En_imp_eV_time[self.get_i_train_timestep_idx():])/(bunch_num_in_train*T_rev))
+    
+    def get_horizontal_nel_hist_i_passage(self, train_num = -1, n_indices: int = 6, bin_height: float = 1.800000e-02):
+        bunch_passage_start, bunch_passage_end = self.get_i_train_n_last_passages(train_num=train_num, n_indices=n_indices)
+        horizontal_hist = np.mean(self.nel_hist[bunch_passage_start:bunch_passage_end],axis = 0)
+        bin_width = self.xg_hist[1] - self.xg_hist[0]
+        horizontal_hist = horizontal_hist/(bin_width*bin_height)
+        return (self.xg_hist, horizontal_hist)
+
 
 
 class PyECLOUDParameterScan:
@@ -736,8 +744,8 @@ class PyECLOUDParameterScan:
                             grid: str = "minor", grid_major_linestyle: str = "-", grid_major_linewidth: float = 0.75,
                             grid_minor_linestyle: str = ":", grid_minor_linewidth: float = 0.5,
                             savefig: bool = False, output_filename: str = "max_cen_density.png", dpi: int = 300, show: bool = True, save_folder: str = "./",
-                            returnfig: bool = False, round_xvals: int = 5, round_curvevals: int = 5
-                            ):
+                            returnfig: bool = False, round_xvals: int = 5, round_curvevals: int = 5,
+                            use_hist: bool = True, hist_n_last_indices: int = 6, hist_bin_height: float = 1.800000e-02):
         if usetex:            
             if not ylabel:
                 ylabel = r"Max Central Electron Density [$ \rm m^{-3}$]"
@@ -749,8 +757,15 @@ class PyECLOUDParameterScan:
         if not title:
             title = f"Max Central Electron Density as a function of {x_axis} and {curves}"
         
-        def calculate_max_cen_density(sim):
-            return max(sim.cen_density)
+        if not use_hist:
+            def calculate_max_cen_density(sim):
+                return max(sim.cen_density)
+        else:
+            def calculate_max_cen_density(sim, n_indices = hist_n_last_indices, bin_height = hist_bin_height):
+                x_hist, nel_hist = sim.get_horizontal_nel_hist_i_passage(n_indices = n_indices, bin_height = bin_height)
+                center_idx = np.squeeze(np.where(x_hist == 0)[0])
+                dens_around_center = [nel_hist[center_idx - 1],nel_hist[center_idx],nel_hist[center_idx + 1]]
+                return max(dens_around_center)
 
         fig = self.plot_simulation_result_vs_attrib(calculate_max_cen_density, x_axis, curves, common_params = common_params , x_axis_vals = x_axis_vals, curve_vals = curve_vals,
                        usetex = usetex, global_fontsize = global_fontsize,
