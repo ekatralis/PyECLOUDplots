@@ -343,7 +343,7 @@ class PyECLOUDParameterScan:
         n_sims = self._find_sim_folders_and_extract_params_yaml_()
         # Convert intensity to smaller range while keeping absolute value
         self.scaled_vals = []
-        print(self.sims_per_parameter.keys())
+
         for param in self.params_dict.keys():
             if self.params_dict[param]["dtype"] in ["float", "int"]:
                 if self.params_dict[param]["convert_to_pow"]:
@@ -638,6 +638,7 @@ class PyECLOUDParameterScan:
             norm = mcolors.Normalize(vmin=min(all_avgs) + cmap_min_offset, vmax=max(all_avgs) + cmap_max_offset)
             for curve_name, data in curves_to_plot.items():
                 data["color"] = cmap(norm(data["avg"]))
+            curves_to_plot = dict(sorted(curves_to_plot.items(), key=lambda item: item[1]['avg'], reverse=True))
 
         for curve_name, curve_data in curves_to_plot.items():
             x = curve_data["x"]
@@ -737,7 +738,7 @@ class PyECLOUDParameterScan:
                             use_interp: bool = True, interp_linspace_size: int = 300, show_datapoints: bool = True, lw: float = 2,
                             plot_figsize : tuple = (8,5), cmap = plt.cm.magma, cmap_min_offset: float = 0, cmap_max_offset: float = 0,
                             val_units: dict = None, show_legend: bool = True, legend_title: str = None, legend_bbox_to_anchor: tuple = (1.04, 0.5), legend_loc: str = "center left",
-                            left_lim: float = None, right_lim: float = None, bottom_lim: float = 5*10**9, top_lim: float = None,
+                            left_lim: float = None, right_lim: float = None, bottom_lim: float = 10**9, top_lim: float = None,
                             title: str = None, title_pad: float = 50, title_fontsize: float = 20,
                             xlabel: str = None, xlabel_pad: float = 10, xlabel_fontsize: float = 20,
                             ylabel: str = None, ylabel_pad: float = 15, ylabel_fontsize: float = 20,
@@ -915,6 +916,7 @@ class PyECLOUDParameterScan:
                 norm = mcolors.Normalize(vmin=min(all_avgs) + cmap_min_offset, vmax=max(all_avgs) + cmap_max_offset)
                 for curve_name, data in curves_to_plot.items():
                     data["color"] = cmap(norm(data["avg"]))
+                curves_to_plot = dict(sorted(curves_to_plot.items(), key=lambda item: item[1]['avg'], reverse=True))
 
             for curve_name, curve_data in curves_to_plot.items():
                 x = curve_data["x"]
@@ -971,6 +973,114 @@ class PyECLOUDParameterScan:
             plt.grid(which='major', linestyle=grid_major_linestyle, linewidth=grid_major_linewidth)
             plt.grid(which='minor', linestyle=grid_minor_linestyle, linewidth=grid_minor_linewidth)
 
+        if returnfig:
+            return fig
+        if savefig:
+            if output_filename:
+                plt.savefig(os.path.join(save_folder,output_filename), dpi = dpi)
+            else:
+                plt.savefig(os.path.join(save_folder,f"plot_{time()}.png"), dpi = dpi)
+        if show:
+            plt.show()
+    
+    def plot_buildup(self, curves : Union[str, dict] = None, 
+                        common_params: dict = {}, curve_vals: list = None, usetex: bool = True, global_fontsize: float = 18,
+                        use_interp: bool = True, interp_linspace_size: int = 300, show_datapoints: bool = True, lw: float = 2,
+                        plot_figsize : tuple = (10,5), cmap = plt.cm.magma, cmap_min_offset: float = 0, cmap_max_offset: float = 0,
+                        val_units: dict = None, show_legend: bool = True, legend_title: str = None, legend_bbox_to_anchor: tuple = (1.04, 0.5), legend_loc: str = "center left",
+                        left_lim: float = None, right_lim: float = None, bottom_lim: float = None, top_lim: float = None,
+                        title: str = None, title_pad: float = 20, title_fontsize: float = 20,
+                        xlabel: str = None, xlabel_pad: float = 10, xlabel_fontsize: float = 20,
+                        ylabel: str = None, ylabel_pad: float = 10, ylabel_fontsize: float = 20,
+                        grid: str = "minor", grid_major_linestyle: str = "-", grid_major_linewidth: float = 0.75,
+                        grid_minor_linestyle: str = ":", grid_minor_linewidth: float = 0.5,
+                        savefig: bool = False, output_filename: str = None, dpi: int = 300, show: bool = True, save_folder: str = "./",
+                        returnfig: bool = False, round_curvevals: int = 5
+                        ):
+        def get_y(sim):
+            return np.sum(sim.nel_hist,axis = 1)/sim.chamber_area
+        
+        if usetex:
+            if not xlabel:
+                xlabel = r"Time [$\mathrm{s}$]"
+            if not ylabel:
+                ylabel = r"Electron Density [$\mathrm{m}^{-3}$]"
+        else:
+            if not xlabel:
+                xlabel = "Time [s]"
+            if not ylabel:
+                ylabel = "Electron Density [m^-3]"
+        
+        if not title:
+            if curves is not None:
+                title = f"Electron buildup in chamber as a function of {curves}"
+            else:
+                title = "Electron buildup in chamber"
+        self.plot_simulation_attribs("t_hist" ,get_y, curves = curves, 
+                                common_params = common_params, curve_vals = curve_vals, usetex = usetex, global_fontsize = global_fontsize,
+                                use_interp = use_interp, interp_linspace_size = interp_linspace_size, show_datapoints = show_datapoints, lw = lw,
+                                plot_figsize = plot_figsize, cmap = cmap, cmap_min_offset = cmap_min_offset, cmap_max_offset = cmap_max_offset,
+                                val_units = val_units, show_legend = show_legend, legend_title = legend_title, legend_bbox_to_anchor = legend_bbox_to_anchor, legend_loc = legend_loc,
+                                left_lim = left_lim, right_lim = right_lim, bottom_lim = bottom_lim, top_lim = top_lim,
+                                title = title, title_pad = title_pad, title_fontsize = title_fontsize,
+                                xlabel = xlabel, xlabel_pad = xlabel_pad, xlabel_fontsize = xlabel_fontsize,
+                                ylabel = ylabel, ylabel_pad = ylabel_pad, ylabel_fontsize = ylabel_fontsize,
+                                grid = grid, grid_major_linestyle = grid_major_linestyle, grid_major_linewidth = grid_major_linewidth,
+                                grid_minor_linestyle = grid_minor_linestyle, grid_minor_linewidth = grid_minor_linewidth,
+                                savefig = savefig, output_filename = output_filename, dpi = dpi, show = show, save_folder = save_folder,
+                                returnfig = returnfig, round_curvevals = round_curvevals)
+    
+    def plot_horizontal_electron_hist(self, curves : Union[str, dict] = None, 
+                        common_params: dict = {}, curve_vals: list = None, usetex: bool = True, global_fontsize: float = 18,
+                        use_interp: bool = True, interp_linspace_size: int = 300, show_datapoints: bool = True, lw: float = 2,
+                        plot_figsize : tuple = (10,5), cmap = plt.cm.magma, cmap_min_offset: float = 0, cmap_max_offset: float = 0,
+                        val_units: dict = None, show_legend: bool = True, legend_title: str = None, legend_bbox_to_anchor: tuple = (1.04, 0.5), legend_loc: str = "center left",
+                        left_lim: float = None, right_lim: float = None, bottom_lim: float = 10**9, top_lim: float = None,
+                        title: str = None, title_pad: float = 20, title_fontsize: float = 20,
+                        xlabel: str = None, xlabel_pad: float = 10, xlabel_fontsize: float = 20,
+                        ylabel: str = None, ylabel_pad: float = 10, ylabel_fontsize: float = 20,
+                        grid: str = "minor", grid_major_linestyle: str = "-", grid_major_linewidth: float = 0.75,
+                        grid_minor_linestyle: str = ":", grid_minor_linewidth: float = 0.5,
+                        savefig: bool = False, output_filename: str = None, dpi: int = 300, show: bool = True, save_folder: str = "./",
+                        returnfig: bool = False, round_curvevals: int = 5,
+                        train_num = -1, n_last_indices_to_avg: int = 6, hist_bin_height: float = 1.800000e-02):
+        
+        def get_y(sim, train_num = train_num, n_indices = n_last_indices_to_avg, bin_height = hist_bin_height):
+            return sim.get_horizontal_nel_hist_i_passage(train_num = train_num, n_indices = n_indices, bin_height = bin_height)[1]
+        
+        if usetex:
+            if not xlabel:
+                xlabel = r"$x_{\rm pos}$ [$\mathrm{m}$]"
+            if not ylabel:
+                ylabel = r"Electron Density [$\mathrm{m}^{-3}$]"
+        else:
+            if not xlabel:
+                xlabel = "x [m]"
+            if not ylabel:
+                ylabel = "Electron Density [m^-3]"
+        
+        if not title:
+            if curves is not None:
+                title = f"Horizontal electron density in chamber as a function of {curves}"
+            else:
+                title = "Horizontal electron density in chamber"
+
+        fig = self.plot_simulation_attribs("xg_hist" ,get_y, curves = curves, 
+                                common_params = common_params, curve_vals = curve_vals, usetex = usetex, global_fontsize = global_fontsize,
+                                use_interp = use_interp, interp_linspace_size = interp_linspace_size, show_datapoints = show_datapoints, lw = lw,
+                                plot_figsize = plot_figsize, cmap = cmap, cmap_min_offset = cmap_min_offset, cmap_max_offset = cmap_max_offset,
+                                val_units = val_units, show_legend = show_legend, legend_title = legend_title, legend_bbox_to_anchor = legend_bbox_to_anchor, legend_loc = legend_loc,
+                                left_lim = left_lim, right_lim = right_lim, bottom_lim = bottom_lim, top_lim = top_lim,
+                                title = title, title_pad = title_pad, title_fontsize = title_fontsize,
+                                xlabel = xlabel, xlabel_pad = xlabel_pad, xlabel_fontsize = xlabel_fontsize,
+                                ylabel = ylabel, ylabel_pad = ylabel_pad, ylabel_fontsize = ylabel_fontsize,
+                                grid = grid, grid_major_linestyle = grid_major_linestyle, grid_major_linewidth = grid_major_linewidth,
+                                grid_minor_linestyle = grid_minor_linestyle, grid_minor_linewidth = grid_minor_linewidth,
+                                savefig = False, output_filename = output_filename, dpi = dpi, show = False, save_folder = save_folder,
+                                returnfig = True, round_curvevals = round_curvevals)
+        plt.semilogy()
+        plt.tight_layout()
+        
         if returnfig:
             return fig
         if savefig:
