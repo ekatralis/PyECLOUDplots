@@ -69,7 +69,10 @@ class PyECLOUDsim:
             converter = dtype_map.get(dtype_str)
             if not converter:
                 raise ValueError(f"Unsupported dtype: {dtype_str}")
-            return converter(value)
+            if value is not None:
+                return converter(value)
+            else:
+                return None
         except Exception as e:
             raise ValueError(f"Error converting value '{value}' to type '{dtype_str}': {e}")
 
@@ -81,7 +84,7 @@ class PyECLOUDsim:
             self.sim_data = mfm.myloadmat_to_obj(os.path.join(self.input_folder,self.sim_output_filename))
         param_names = params.keys()
         vars_to_load = [entry.get('var_name') for entry in params.values()]
-        sim_params = self.parse_values_from_files(vars_to_load)
+        sim_params = self.parse_values_from_files(vars_to_load, is_internal = True)
         
         for param in param_names:
             attr_name = param.replace(" ", "_")
@@ -105,7 +108,7 @@ class PyECLOUDsim:
         self.intensity = float(sim_params['fact_beam'])
         self.magnet_conf = sim_params['B_multip']
 
-    def parse_values_from_files(self,attribute_names: list,filenames: list = None):
+    def parse_values_from_files(self,attribute_names: list,filenames: list = None, is_internal: bool = False):
         '''
         Get attributes from simulation files. attribute_names is a list of strings, filenames (optional) can be used to specify specific filenames to search
         '''
@@ -130,7 +133,11 @@ class PyECLOUDsim:
                     with lock:
                         attribute_vals[attribute_name] = value
                     return
-            raise Exception(f"{attribute_name} not found in simulation files")
+            if not is_internal:
+                raise Exception(f"{attribute_name} not found in simulation files")
+            else:
+                with lock:
+                    attribute_vals[attribute_name] = None
 
         lines = []
         for filename in filenames:
@@ -328,14 +335,17 @@ class PyECLOUDParameterScan:
         n_sims = self._find_sim_folders_and_extract_params_yaml_()
         # Convert intensity to smaller range while keeping absolute value
         self.scaled_vals = []
+        print(self.sims_per_parameter.keys())
         for param in self.params_dict.keys():
             if self.params_dict[param]["dtype"] in ["float", "int"]:
                 if self.params_dict[param]["convert_to_pow"]:
                     attr_name = param.replace(" ", "_")+"_Pow"
-                    setattr(self, attr_name, int(np.log10(np.array(list(self.sims_per_parameter[param].keys())).mean())))
+                    numeric_keys = [k for k in self.sims_per_parameter[param].keys() if k is not None]
+                    setattr(self, attr_name, int(np.log10(np.array(numeric_keys).mean())))
                     keys = list(self.sims_per_parameter[param].keys())
                     for key in keys:
-                        self.sims_per_parameter[param][float(key/(np.pow(10,getattr(self, attr_name))))] = self.sims_per_parameter[param].pop(key)
+                        if key is not None:
+                            self.sims_per_parameter[param][float(key/(np.pow(10.0,getattr(self, attr_name))))] = self.sims_per_parameter[param].pop(key)
                     self.scaled_vals.append(param)
                     
 
@@ -347,13 +357,16 @@ class PyECLOUDParameterScan:
                 return float(val)
             except ValueError:
                 return val
+            except TypeError:
+                return -float("inf")
             
         for key in self.sims_per_parameter.keys():
             available_vals = list(self.sims_per_parameter[key].keys())
-            available_vals.sort(key=try_numeric)
+            if self.params_dict[key]["dtype"] in ["float","int"]:
+                available_vals.sort(key=try_numeric)
             if len(available_vals) > 1:
                 attr_name = key.replace(" ", "_")+"_Pow"
-                print(f"-'{key}'. With available values:{' (scaled by 1e%d)' % getattr(self,attr_name) if key in self.scaled_vals else ''}(Data Type: {type(available_vals[0])})")
+                print(f"-'{key}'. With available values:{' (scaled by 1e%d)' % getattr(self,attr_name) if key in self.scaled_vals else ''}(Data Type: {self.params_dict[key]["dtype"]})")
                 
                 for val in available_vals:
                     print(f"    ->{val}")
@@ -451,7 +464,7 @@ class PyECLOUDParameterScan:
     def print_available_params(self):
         for key in self.available_params.keys():
             attr_name = key.replace(" ", "_")+"_Pow"
-            print(f"-'{key}'. With available values:{' (scaled by 1e%d)' % getattr(self,attr_name) if key in self.scaled_vals else ''} (Data Type: {type(self.available_params[key][0])})")
+            print(f"-'{key}'. With available values:{' (scaled by 1e%d)' % getattr(self,attr_name) if key in self.scaled_vals else ''} (Data Type: {self.params_dict[key]["dtype"]})")
             for val in self.available_params[key]:
                 print(f"    ->{val}")
     
