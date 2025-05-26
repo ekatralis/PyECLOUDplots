@@ -467,7 +467,11 @@ class PyECLOUDParameterScan:
                     raise Exception(f"Specified parameters do not uniquely define simulation. \n Available simulations for specified parameters are: {sim_loc}\n All available parameters are: \n{self.print_available_params_str}")
         except KeyError:
             raise Exception(f"Check that provided parameters are in available parameters for plotting. All available parameters are: \n{self.print_available_params_str}")
-            
+    
+    def get_param_values(self, param: str):
+        if param not in self.available_params.keys():
+            raise ValueError("Param must be in available params for plotting")
+        return self.available_params[param]
 
     def print_available_params(self):
         for key in self.available_params.keys():
@@ -508,7 +512,7 @@ class PyECLOUDParameterScan:
 
     def plot_simulation_result_vs_attrib(self, result_func: Callable[[Any], float], x_axis: str, curves: Union[str, dict], 
                        common_params: dict = {}, attrib_name: str = None, attrib_unit: str = None, x_axis_vals: list = None, curve_vals: list = None,
-                       usetex: bool = True, global_fontsize: float = 18,
+                       usetex: bool = True, global_fontsize: float = 18, curve_colors: dict = None,
                        use_interp: bool = True, interp_linspace_size: int = 300, show_datapoints: bool = True, lw: float = 2,
                        plot_figsize : tuple = (10,5), cmap = plt.cm.magma, cmap_min_offset: float = 0, cmap_max_offset: float = 0 ,
                        val_units: dict = None, show_legend: bool = True, legend_title: str = None, legend_bbox_to_anchor: tuple = (1.04, 0.5), legend_loc: str = "center left",
@@ -628,17 +632,20 @@ class PyECLOUDParameterScan:
                 "y"     : attrib_vals,
                 "avg"   : np.mean(attrib_vals)
             }
-
-        if curves_is_str and (isinstance(curve_vals[0],float) or isinstance(curve_vals[0],int)):
-            norm = mcolors.Normalize(vmin=min(curve_vals) + cmap_min_offset, vmax=max(curve_vals) + cmap_max_offset)
-            for curve_name, data in curves_to_plot.items():
-                data["color"] = cmap(norm(curve_name))
+        if curve_colors is None:
+            if curves_is_str and (isinstance(curve_vals[0],float) or isinstance(curve_vals[0],int)):
+                norm = mcolors.Normalize(vmin=min(curve_vals) + cmap_min_offset, vmax=max(curve_vals) + cmap_max_offset)
+                for curve_name, data in curves_to_plot.items():
+                    data["color"] = cmap(norm(curve_name))
+            else:
+                all_avgs = [d["avg"] for d in curves_to_plot.values()]
+                norm = mcolors.Normalize(vmin=min(all_avgs) + cmap_min_offset, vmax=max(all_avgs) + cmap_max_offset)
+                for curve_name, data in curves_to_plot.items():
+                    data["color"] = cmap(norm(data["avg"]))
+                curves_to_plot = dict(sorted(curves_to_plot.items(), key=lambda item: item[1]['avg'], reverse=True))
         else:
-            all_avgs = [d["avg"] for d in curves_to_plot.values()]
-            norm = mcolors.Normalize(vmin=min(all_avgs) + cmap_min_offset, vmax=max(all_avgs) + cmap_max_offset)
             for curve_name, data in curves_to_plot.items():
-                data["color"] = cmap(norm(data["avg"]))
-            curves_to_plot = dict(sorted(curves_to_plot.items(), key=lambda item: item[1]['avg'], reverse=True))
+                data["color"] = curve_colors[curve_name]
 
         for curve_name, curve_data in curves_to_plot.items():
             x = curve_data["x"]
@@ -685,9 +692,11 @@ class PyECLOUDParameterScan:
                 plt.savefig(os.path.join(save_folder,f"plot_{time()}.png"), dpi = dpi)
         if show:
             plt.show()
+        
+        plt.close(fig)
     
     def plot_heat_load(self, x_axis: str, curves: Union[str, dict], common_params: dict = {}, x_axis_vals: list = None, curve_vals: list = None,
-                       T_rev: float = 88.9e-6, unit: str = "mW", usetex: bool = True, global_fontsize: float = 18,
+                       T_rev: float = 88.9e-6, unit: str = "mW", usetex: bool = True, global_fontsize: float = 18, curve_colors: dict = None,
                        use_interp: bool = True, interp_linspace_size: int = 300, show_datapoints: bool = True, lw: float = 2,
                        plot_figsize : tuple = (10,5), cmap = plt.cm.magma, cmap_min_offset: float = 0, cmap_max_offset: float = 0,
                        val_units: dict = None, show_legend: bool = True, legend_title: str = None, legend_bbox_to_anchor: tuple = (1.04, 0.5), legend_loc: str = "center left",
@@ -719,7 +728,7 @@ class PyECLOUDParameterScan:
             return sim.calculate_heat_load_per_bunch(T_rev = T_rev, unit = unit)
 
         self.plot_simulation_result_vs_attrib(heat_load_func, x_axis, curves, common_params = common_params , x_axis_vals = x_axis_vals, curve_vals = curve_vals,
-                       usetex = usetex, global_fontsize = global_fontsize,
+                       usetex = usetex, global_fontsize = global_fontsize, curve_colors = curve_colors,
                        use_interp = use_interp, interp_linspace_size = interp_linspace_size, show_datapoints = show_datapoints, lw = lw,
                        plot_figsize = plot_figsize, cmap = cmap, cmap_min_offset = cmap_min_offset, cmap_max_offset = cmap_max_offset,
                        val_units = val_units, show_legend = show_legend, legend_title = legend_title, legend_bbox_to_anchor = legend_bbox_to_anchor, legend_loc = legend_loc,
@@ -733,8 +742,8 @@ class PyECLOUDParameterScan:
                        returnfig = returnfig, round_xvals = round_xvals, round_curvevals = round_curvevals
                        )
     
-    def plot_max_cen_density(self, x_axis: str, curves: str, common_params: dict = {}, x_axis_vals: list = None, curve_vals: list = None,
-                            usetex: bool = True, global_fontsize: float = 15,
+    def plot_max_cen_density(self, x_axis: str, curves: Union[str, dict], common_params: dict = {}, x_axis_vals: list = None, curve_vals: list = None,
+                            usetex: bool = True, global_fontsize: float = 15, curve_colors: dict = None,
                             use_interp: bool = True, interp_linspace_size: int = 300, show_datapoints: bool = True, lw: float = 2,
                             plot_figsize : tuple = (8,5), cmap = plt.cm.magma, cmap_min_offset: float = 0, cmap_max_offset: float = 0,
                             val_units: dict = None, show_legend: bool = True, legend_title: str = None, legend_bbox_to_anchor: tuple = (1.04, 0.5), legend_loc: str = "center left",
@@ -769,7 +778,7 @@ class PyECLOUDParameterScan:
                 return max(dens_around_center)
 
         fig = self.plot_simulation_result_vs_attrib(calculate_max_cen_density, x_axis, curves, common_params = common_params , x_axis_vals = x_axis_vals, curve_vals = curve_vals,
-                       usetex = usetex, global_fontsize = global_fontsize,
+                       usetex = usetex, global_fontsize = global_fontsize, curve_colors = curve_colors,
                        use_interp = use_interp, interp_linspace_size = interp_linspace_size, show_datapoints = show_datapoints, lw = lw,
                        plot_figsize = plot_figsize, cmap = cmap, cmap_min_offset = cmap_min_offset, cmap_max_offset = cmap_max_offset,
                        val_units = val_units, show_legend = show_legend, legend_title = legend_title, legend_bbox_to_anchor = legend_bbox_to_anchor, legend_loc = legend_loc,
@@ -793,8 +802,10 @@ class PyECLOUDParameterScan:
         if show:
             plt.show()
         
+        plt.close(fig)
+        
     def plot_simulation_attribs(self, x_axis_attrib: Union[str, Callable[[Any], list[float]]] ,y_axis_attrib : Union[str, Callable[[Any], list[float]]], curves : Union[str, dict] = None, 
-                                common_params: dict = {}, curve_vals: list = None, usetex: bool = True, global_fontsize: float = 18,
+                                common_params: dict = {}, curve_vals: list = None, usetex: bool = True, global_fontsize: float = 18, curve_colors: dict = None,
                                 use_interp: bool = True, interp_linspace_size: int = 300, show_datapoints: bool = True, lw: float = 2,
                                 plot_figsize : tuple = (10,5), cmap = plt.cm.magma, cmap_min_offset: float = 0, cmap_max_offset: float = 0,
                                 val_units: dict = None, show_legend: bool = True, legend_title: str = None, legend_bbox_to_anchor: tuple = (1.04, 0.5), legend_loc: str = "center left",
@@ -906,17 +917,20 @@ class PyECLOUDParameterScan:
                         "y"     : y_axis_vals,
                         "avg"   : np.mean(y_axis_vals)
                     }
-
-            if curves_is_str and (isinstance(curve_vals[0],float) or isinstance(curve_vals[0],int)):
-                norm = mcolors.Normalize(vmin=min(curve_vals) + cmap_min_offset, vmax=max(curve_vals) + cmap_max_offset)
-                for curve_name, data in curves_to_plot.items():
-                    data["color"] = cmap(norm(curve_name))
+            if curve_colors is None:
+                if curves_is_str and (isinstance(curve_vals[0],float) or isinstance(curve_vals[0],int)):
+                    norm = mcolors.Normalize(vmin=min(curve_vals) + cmap_min_offset, vmax=max(curve_vals) + cmap_max_offset)
+                    for curve_name, data in curves_to_plot.items():
+                        data["color"] = cmap(norm(curve_name))
+                else:
+                    all_avgs = [d["avg"] for d in curves_to_plot.values()]
+                    norm = mcolors.Normalize(vmin=min(all_avgs) + cmap_min_offset, vmax=max(all_avgs) + cmap_max_offset)
+                    for curve_name, data in curves_to_plot.items():
+                        data["color"] = cmap(norm(data["avg"]))
+                    curves_to_plot = dict(sorted(curves_to_plot.items(), key=lambda item: item[1]['avg'], reverse=True))
             else:
-                all_avgs = [d["avg"] for d in curves_to_plot.values()]
-                norm = mcolors.Normalize(vmin=min(all_avgs) + cmap_min_offset, vmax=max(all_avgs) + cmap_max_offset)
                 for curve_name, data in curves_to_plot.items():
-                    data["color"] = cmap(norm(data["avg"]))
-                curves_to_plot = dict(sorted(curves_to_plot.items(), key=lambda item: item[1]['avg'], reverse=True))
+                    data["color"] = curve_colors[curve_name]
 
             for curve_name, curve_data in curves_to_plot.items():
                 x = curve_data["x"]
@@ -982,9 +996,11 @@ class PyECLOUDParameterScan:
                 plt.savefig(os.path.join(save_folder,f"plot_{time()}.png"), dpi = dpi)
         if show:
             plt.show()
+        
+        plt.close(fig)
     
-    def plot_buildup(self, curves : Union[str, dict] = None, 
-                        common_params: dict = {}, curve_vals: list = None, usetex: bool = True, global_fontsize: float = 18,
+    def plot_buildup(self, curves : Union[str, dict] = None, common_params: dict = {}, 
+                        curve_vals: list = None, usetex: bool = True, global_fontsize: float = 18, curve_colors: dict = None,
                         use_interp: bool = True, interp_linspace_size: int = 300, show_datapoints: bool = True, lw: float = 2,
                         plot_figsize : tuple = (10,5), cmap = plt.cm.magma, cmap_min_offset: float = 0, cmap_max_offset: float = 0,
                         val_units: dict = None, show_legend: bool = True, legend_title: str = None, legend_bbox_to_anchor: tuple = (1.04, 0.5), legend_loc: str = "center left",
@@ -1016,8 +1032,8 @@ class PyECLOUDParameterScan:
                 title = f"Electron buildup in chamber as a function of {curves}"
             else:
                 title = "Electron buildup in chamber"
-        self.plot_simulation_attribs("t_hist" ,get_y, curves = curves, 
-                                common_params = common_params, curve_vals = curve_vals, usetex = usetex, global_fontsize = global_fontsize,
+        self.plot_simulation_attribs("t_hist" ,get_y, curves = curves, common_params = common_params,
+                                curve_vals = curve_vals, usetex = usetex, global_fontsize = global_fontsize, curve_colors = curve_colors,
                                 use_interp = use_interp, interp_linspace_size = interp_linspace_size, show_datapoints = show_datapoints, lw = lw,
                                 plot_figsize = plot_figsize, cmap = cmap, cmap_min_offset = cmap_min_offset, cmap_max_offset = cmap_max_offset,
                                 val_units = val_units, show_legend = show_legend, legend_title = legend_title, legend_bbox_to_anchor = legend_bbox_to_anchor, legend_loc = legend_loc,
@@ -1030,8 +1046,8 @@ class PyECLOUDParameterScan:
                                 savefig = savefig, output_filename = output_filename, dpi = dpi, show = show, save_folder = save_folder,
                                 returnfig = returnfig, round_curvevals = round_curvevals)
     
-    def plot_horizontal_electron_hist(self, curves : Union[str, dict] = None, 
-                        common_params: dict = {}, curve_vals: list = None, usetex: bool = True, global_fontsize: float = 18,
+    def plot_horizontal_electron_hist(self, curves : Union[str, dict] = None, common_params: dict = {}, 
+                        curve_vals: list = None, usetex: bool = True, global_fontsize: float = 18, curve_colors: dict = None,
                         use_interp: bool = True, interp_linspace_size: int = 300, show_datapoints: bool = True, lw: float = 2,
                         plot_figsize : tuple = (10,5), cmap = plt.cm.magma, cmap_min_offset: float = 0, cmap_max_offset: float = 0,
                         val_units: dict = None, show_legend: bool = True, legend_title: str = None, legend_bbox_to_anchor: tuple = (1.04, 0.5), legend_loc: str = "center left",
@@ -1065,8 +1081,8 @@ class PyECLOUDParameterScan:
             else:
                 title = "Horizontal electron density in chamber"
 
-        fig = self.plot_simulation_attribs("xg_hist" ,get_y, curves = curves, 
-                                common_params = common_params, curve_vals = curve_vals, usetex = usetex, global_fontsize = global_fontsize,
+        fig = self.plot_simulation_attribs("xg_hist" ,get_y, curves = curves, common_params = common_params, 
+                                curve_vals = curve_vals, usetex = usetex, global_fontsize = global_fontsize, curve_colors = curve_colors,
                                 use_interp = use_interp, interp_linspace_size = interp_linspace_size, show_datapoints = show_datapoints, lw = lw,
                                 plot_figsize = plot_figsize, cmap = cmap, cmap_min_offset = cmap_min_offset, cmap_max_offset = cmap_max_offset,
                                 val_units = val_units, show_legend = show_legend, legend_title = legend_title, legend_bbox_to_anchor = legend_bbox_to_anchor, legend_loc = legend_loc,
@@ -1081,6 +1097,226 @@ class PyECLOUDParameterScan:
         plt.semilogy()
         plt.tight_layout()
         
+        if returnfig:
+            return fig
+        if savefig:
+            if output_filename:
+                plt.savefig(os.path.join(save_folder,output_filename), dpi = dpi)
+            else:
+                plt.savefig(os.path.join(save_folder,f"plot_{time()}.png"), dpi = dpi)
+        if show:
+            plt.show()
+        
+        plt.close(fig)
+        
+    def plot_half_cell_heat_load(self, magnet_config: Union[str, dict], x_axis: str, curves: Union[str, dict], common_params: dict = {}, 
+                       curve_colors: dict = None, attrib_name: str = None, attrib_unit: str = None, x_axis_vals: list = None, curve_vals: list = None, 
+                       T_rev: float = 88.9e-6, unit: str = "mW", usetex: bool = True, global_fontsize: float = 18,
+                       use_interp: bool = True, interp_linspace_size: int = 300, show_datapoints: bool = True, lw: float = 2,
+                       plot_figsize : tuple = (10,5), cmap = plt.cm.magma, cmap_min_offset: float = 0, cmap_max_offset: float = 0 ,
+                       val_units: dict = None, show_legend: bool = True, legend_title: str = None, legend_bbox_to_anchor: tuple = (1.04, 0.5), legend_loc: str = "center left",
+                       left_lim: float = None, right_lim: float = None, bottom_lim: float = 0, top_lim: float = None,
+                       title: str = None, title_pad: float = 20, title_fontsize: float = 20,
+                       xlabel: str = None, xlabel_pad: float = 10, xlabel_fontsize: float = 20,
+                       ylabel: str = None, ylabel_pad: float = 10, ylabel_fontsize: float = 20,
+                       grid: str = "minor", grid_major_linestyle: str = "-", grid_major_linewidth: float = 0.75,
+                       grid_minor_linestyle: str = ":", grid_minor_linewidth: float = 0.5,
+                       savefig: bool = False, output_filename: str = None, dpi: int = 300, show: bool = True, save_folder: str = "./",
+                       returnfig: bool = False, round_xvals: int = 5, round_curvevals: int = 5
+                       ):
+        mpl.rcParams.update(mpl.rcParamsDefault)
+        if not (isinstance(self.available_params[x_axis][0], float) or isinstance(self.available_params[x_axis][0], int)):
+            raise ValueError("Values on x_axis cannot be non numeric")
+        
+        
+        if isinstance(magnet_config,str):
+            if curves.endswith(".yaml"):
+                curves_dict = self.read_yaml_to_dict(curves)
+            else:
+                ValueError("'magnet_config' must either be a yaml file or dict")
+        elif isinstance(magnet_config, dict):
+            pass
+        else:
+            raise ValueError("'magnet_config' must either be a yaml file or dict")
+        
+        curves_dict = {}
+        if isinstance(curves,str):
+            if curves.endswith(".yaml"):
+                curves_dict = self.read_yaml_to_dict(curves)
+                curves_is_str = False
+            else:
+                if curve_vals is None:
+                    curve_vals = self.available_params[curves]
+                    curves_dict = {v: {curves : v} for v in curve_vals}
+                else:
+                    curves_dict = {round(v, round_curvevals): {curves : round(v, round_curvevals)} for v in curve_vals}
+                curves_is_str = True
+        elif isinstance(curves,dict):
+            if curve_vals:
+                raise ValueError("If curve_vals is specified, 'curves' must uniquely define a parameter that can be iterable")
+            curves_dict = curves
+            curves_is_str = False
+        else:
+            raise ValueError("'curves' must either define a specific parameter as 'str' or a group of parameters as 'dict'")
+
+        dispunit = {
+            "mW" : "mW",
+            "W"  : "W",
+            "eV" : "eV/s"
+        }
+        
+        if not ylabel:
+            ylabel = f"Heat load [{dispunit[unit]}/bunch]"
+        if usetex:
+            plt.rcParams.update({
+                "text.usetex": True,        # Use LaTeX to render all text
+                "font.family": "serif",     # Use serif fonts (Computer Modern is default)
+                "font.serif": ["Computer Modern"],  # Optionally specify which serif font
+                "font.size" : global_fontsize
+            })
+
+            if not val_units:
+                val_units = self.get_value_units_dict_tex()
+            if curves_is_str and (not legend_title):
+                if val_units[curves]:
+                    legend_title = r"$\begin{array}{c}"+rf"\mathrm{{{curves}}} \\"+r"\left["+val_units[curves]+r"\right]"+r"\end{array}$"
+                else:
+                    legend_title = curves
+
+            if not xlabel:
+                if val_units[x_axis]:
+                    xlabel = f"{x_axis} " + r"$\left[" + val_units[x_axis] + r"\right]$"
+                else:
+                    xlabel = f"{x_axis}"
+            
+            if not ylabel:
+                if attrib_name:
+                    if attrib_unit:
+                        ylabel = f"{attrib_name} " + r"$\left["+attrib_unit+r"\right]$"
+                    else:
+                        ylabel = attrib_name
+                else:
+                    ylabel = None
+
+        else:
+            plt.rcParams.update({
+                "font.size" : global_fontsize
+            })
+            if not val_units:
+                val_units = self.get_value_units_dict()
+            if curves_is_str and (not legend_title):
+                if val_units[curves]:
+                    legend_title = f"{curves}\n [{val_units[curves]}]"
+                else:
+                    legend_title = curves
+            
+            if not xlabel:
+                if val_units[x_axis]:
+                    xlabel = f"{x_axis} " + "[" + val_units[x_axis] + "]"
+                else:
+                    xlabel = f"{x_axis}"
+            
+            if not ylabel:
+                if attrib_name:
+                    if attrib_unit:
+                        ylabel = f"{attrib_name} [{attrib_unit}]"
+                    else:
+                        ylabel = attrib_name
+                else:
+                    ylabel = None
+        if not title:
+            if isinstance(curves,str):
+                title = f"Heat load in half cell as a function of {x_axis} and {curves}"
+            else:
+                title = f"Heat load in half cell as a function of {x_axis}"
+        if x_axis_vals is None:
+            x_axis_vals = self.available_params[x_axis]
+        
+        fig = plt.figure(figsize=plot_figsize)
+
+        n_elements_in_cell = len(magnet_config.keys())
+        curves_to_plot = {}
+        for curve_name, curve_params in curves_dict.items():
+            attrib_vals = []
+            x_axis_vals_plot = []
+            for x_axis_val in x_axis_vals:
+                x_axis_val = round(x_axis_val, round_xvals)
+                curve_params[x_axis] = x_axis_val
+                sim_params = common_params | curve_params
+                n_elements = 0
+                total_heat_load = 0
+                for config in magnet_config.keys():
+                    element_params = sim_params.copy()
+                    element_params['Magnet Configuration'] = config
+                    heat_load_element = 0
+                    try:
+                        sim = self.get_simulation(element_params, is_internal = True)
+                    except Exception as e:
+                        raise ValueError(f"Parameters must uniquely define simulations. common_params has current value {common_params}. Ensure that all parameters not included in 'x_axis' and 'curves' are specified.") from e
+                    if sim:
+                        heat_load_element = sim.calculate_heat_load_per_bunch(T_rev = T_rev, unit = unit)
+                        total_heat_load += heat_load_element*magnet_config[config]
+                        n_elements +=1
+                if n_elements == n_elements_in_cell:
+                    attrib_vals.append(total_heat_load)
+                    x_axis_vals_plot.append(x_axis_val)
+            
+            curves_to_plot[curve_name] = {
+                "x"     : x_axis_vals_plot,
+                "y"     : attrib_vals,
+                "avg"   : np.mean(attrib_vals)
+            }
+        if curve_colors is None:
+            if curves_is_str and (isinstance(curve_vals[0],float) or isinstance(curve_vals[0],int)):
+                norm = mcolors.Normalize(vmin=min(curve_vals) + cmap_min_offset, vmax=max(curve_vals) + cmap_max_offset)
+                for curve_name, data in curves_to_plot.items():
+                    data["color"] = cmap(norm(curve_name))
+            else:
+                all_avgs = [d["avg"] for d in curves_to_plot.values()]
+                norm = mcolors.Normalize(vmin=min(all_avgs) + cmap_min_offset, vmax=max(all_avgs) + cmap_max_offset)
+                for curve_name, data in curves_to_plot.items():
+                    data["color"] = cmap(norm(data["avg"]))
+                curves_to_plot = dict(sorted(curves_to_plot.items(), key=lambda item: item[1]['avg'], reverse=True))
+        else:
+            for curve_name, data in curves_to_plot.items():
+                data["color"] = curve_colors[curve_name]
+                
+        for curve_name, curve_data in curves_to_plot.items():
+            x = curve_data["x"]
+            y = curve_data["y"]
+            plt_color = curve_data["color"]
+            if len(x) > 0:
+                if use_interp:
+                    pchip = PchipInterpolator(x, y)
+                    xx = np.linspace(min(x), max(x), interp_linspace_size)
+                    yy = pchip(xx)
+                    if show_datapoints:
+                        plt.plot(x,y,".",lw = lw+1, color = plt_color)
+                    plt.plot(xx,yy, lw = lw,label=f"{curve_name}", color = plt_color)
+                else:
+                    plt.plot(x,y,lw = lw,label=f"{curve_name}", color = plt_color)
+                    if show_datapoints:
+                        plt.plot(x,y,".",lw= lw + 1, color = plt_color)
+        
+        if title:
+            plt.title(title, pad=title_pad, fontsize=title_fontsize)
+        if xlabel:
+            plt.xlabel(xlabel, labelpad=xlabel_pad, fontsize=xlabel_fontsize)
+        if ylabel:
+            plt.ylabel(ylabel, labelpad=ylabel_pad, fontsize=ylabel_fontsize)
+        if show_legend:
+            plt.legend(bbox_to_anchor=legend_bbox_to_anchor, loc=legend_loc).set_title(legend_title)
+        
+        plt.tight_layout()
+        plt.xlim(left = left_lim, right = right_lim)
+        plt.ylim(bottom = bottom_lim, top = top_lim)
+        if grid == "major":
+            plt.grid(which='major', linestyle=grid_major_linestyle, linewidth=grid_major_linewidth)
+        if grid == "minor":
+            plt.minorticks_on()
+            plt.grid(which='major', linestyle=grid_major_linestyle, linewidth=grid_major_linewidth)
+            plt.grid(which='minor', linestyle=grid_minor_linestyle, linewidth=grid_minor_linewidth)
+
         if returnfig:
             return fig
         if savefig:
