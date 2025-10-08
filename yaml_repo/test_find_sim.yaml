@@ -1,0 +1,5 @@
+"SEY" : 1.2
+"Intensity" : 0.8
+"Magnet Configuration" : "[0.0, 182.84444444444443]"
+"Beam Filling Pattern" : "3*(4*(36*[1.]+7*[0.]) + 24*[0.])"
+"Photoemission Enabled" : True

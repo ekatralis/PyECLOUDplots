@@ -1,0 +1,23 @@
+Cu2O Photoemission:
+  SEY Emax :                "332."
+  SEY s_param :             
+  Photoemission k_pe_st:    7.708664e-04
+  Photoemission refl_frac:  1.885900e-01
+
+Cu2O Reduced Photoemission:
+  SEY Emax :                "332."
+  SEY s_param :             
+  Photoemission k_pe_st:    1.525536e-04
+  Photoemission refl_frac:  2.027578e-01
+
+CuO Photoemission:
+  SEY Emax :                "650 / del_max"
+  SEY s_param :             1.25
+  Photoemission k_pe_st:    7.708664e-04
+  Photoemission refl_frac:  1.885900e-01
+
+CuO Reduced Photoemission:
+  SEY Emax :                "650 / del_max"
+  SEY s_param :             1.25
+  Photoemission k_pe_st:    1.525536e-04
+  Photoemission refl_frac:  2.027578e-01

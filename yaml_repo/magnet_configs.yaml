@@ -1,0 +1,6 @@
+Dipoles:
+  Magnet Configuration: "[8.33/7000*6800]"
+Quadrupoles:
+  Magnet Configuration: "[0.0, 182.84444444444443]"
+Drift:
+  Magnet Configuration: "[0]"
