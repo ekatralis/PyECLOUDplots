@@ -261,7 +261,30 @@ class PyECLOUDsim:
             if train_num > n_trains:
                 raise ValueError("Train index must not exceed number of total trains. Trains are considered 1-indexed")
         return int((((train_num-1)*train_length))*chunk_size - 1)
-
+    
+    def get_i_train_last_bunch_start(self, train_num = -1, last_timestep_idx = 5):
+        '''
+        Get index of the i-th train for data saved every timestep. If unspecified, the index for the last train is returned.
+        '''
+        params = self.extract_beam_params()
+        reference_bunch_list = self.t_hist
+        reference_timestep_list = self.t
+        n_trains = params[0]
+        n_reps_inside_train = params[1]
+        n_filled = params[2]
+        n_empty = params[4]
+        n_sep_trains = params[6]
+        train_length = n_reps_inside_train*(n_filled+n_empty) + n_sep_trains
+        num_chunks = reference_bunch_list.shape[0]
+        chunk_size = reference_timestep_list.shape[0] / num_chunks
+        if train_num == -1:
+            train_num = n_trains
+        else:
+            if train_num > n_trains:
+                raise ValueError("Train index must not exceed number of total trains. Trains are considered 1-indexed")
+        last_idx = int((((train_num-1)*train_length) + (n_reps_inside_train-1)*(n_filled+n_empty) + n_filled)*chunk_size)
+        return (last_idx, last_idx + last_timestep_idx)
+    
     def timestep_list_to_bunch_list(self, list_to_be_rescaled, mode="sum"):
         '''
         Convert list saved for every timestep to list saved for every bunch passage.
@@ -510,6 +533,24 @@ class PyECLOUDParameterScan:
             yaml_dict = yaml.safe_load(file)
         return yaml_dict
 
+    def _get_curves_with_colors_(self,curves_to_plot: dict, curves_is_str: bool, curve_vals: list = None, 
+                                curve_colors: dict = None, cmap_min_offset: float = 0, cmap_max_offset: float = 0):
+        if curve_colors is None:
+            if curves_is_str and (isinstance(curve_vals[0],float) or isinstance(curve_vals[0],int)):
+                norm = mcolors.Normalize(vmin=min(curve_vals) + cmap_min_offset, vmax=max(curve_vals) + cmap_max_offset)
+                for curve_name, data in curves_to_plot.items():
+                    data["color"] = cmap(norm(curve_name))
+            else:
+                all_avgs = [d["avg"] for d in curves_to_plot.values()]
+                norm = mcolors.Normalize(vmin=min(all_avgs) + cmap_min_offset, vmax=max(all_avgs) + cmap_max_offset)
+                for curve_name, data in curves_to_plot.items():
+                    data["color"] = cmap(norm(data["avg"]))
+                curves_to_plot = dict(sorted(curves_to_plot.items(), key=lambda item: item[1]['avg'], reverse=True))
+        else:
+            for curve_name, data in curves_to_plot.items():
+                data["color"] = curve_colors[curve_name]
+        return curves_to_plot
+
     def plot_simulation_result_vs_attrib(self, result_func: Callable[[Any], float], x_axis: str, curves: Union[str, dict], 
                        common_params: dict = {}, attrib_name: str = None, attrib_unit: str = None, x_axis_vals: list = None, curve_vals: list = None,
                        usetex: bool = True, global_fontsize: float = 18, curve_colors: dict = None,
@@ -646,6 +687,8 @@ class PyECLOUDParameterScan:
         else:
             for curve_name, data in curves_to_plot.items():
                 data["color"] = curve_colors[curve_name]
+        # curves_to_plot = self._get_curves_with_colors_(curves_to_plot,curves_is_str, curve_vals=curve_vals, curve_colors=curve_colors, 
+        #                                               cmap_max_offset=cmap_max_offset, cmap_min_offset=cmap_min_offset)
 
         for curve_name, curve_data in curves_to_plot.items():
             x = curve_data["x"]
@@ -753,29 +796,39 @@ class PyECLOUDParameterScan:
                             ylabel: str = None, ylabel_pad: float = 15, ylabel_fontsize: float = 20,
                             grid: str = "minor", grid_major_linestyle: str = "-", grid_major_linewidth: float = 0.75,
                             grid_minor_linestyle: str = ":", grid_minor_linewidth: float = 0.5,
-                            savefig: bool = False, output_filename: str = "max_cen_density.png", dpi: int = 300, show: bool = True, save_folder: str = "./",
+                            savefig: bool = False, output_filename: str = "cen_density.png", dpi: int = 300, show: bool = True, save_folder: str = "./",
                             returnfig: bool = False, round_xvals: int = 5, round_curvevals: int = 5,
-                            use_hist: bool = True, hist_n_last_indices: int = 6, hist_bin_height: float = 1.800000e-02):
+                            mode: str = "last_idx", hist_n_last_indices: int = 6, hist_bin_height: float = 1.800000e-02):
         if usetex:            
             if not ylabel:
-                ylabel = r"Max Central Electron Density [$ \rm m^{-3}$]"
+                ylabel = r"Central Electron Density [$ \rm m^{-3}$]"
 
         else:
             if not ylabel:
-                ylabel = f"Max Central Electron Density [m^-3]"
+                ylabel = f"Central Electron Density [m^-3]"
 
         if not title:
-            title = f"Max Central Electron Density as a function of {x_axis} and {curves}"
-        
-        if not use_hist:
+            title = f"Central Electron Density as a function of {x_axis} and {curves}"            
+
+        if mode == "max_cen":
             def calculate_max_cen_density(sim):
                 return max(sim.cen_density)
-        else:
+        elif mode == "x_hist":
             def calculate_max_cen_density(sim, n_indices = hist_n_last_indices, bin_height = hist_bin_height):
                 x_hist, nel_hist = sim.get_horizontal_nel_hist_i_passage(n_indices = n_indices, bin_height = bin_height)
                 center_idx = np.squeeze(np.where(x_hist == 0)[0])
                 dens_around_center = [nel_hist[center_idx - 1],nel_hist[center_idx],nel_hist[center_idx + 1]]
                 return max(dens_around_center)
+        elif mode == "last_idx":
+            def calculate_max_cen_density(sim):
+                idx1, idx2 = sim.get_i_train_last_bunch_start()
+                # Debugging
+                # plt.plot(sim.t,sim.cen_density, color = 'b')
+                # plt.plot(sim.t[idx1:idx2],sim.cen_density[idx1:idx2],lw = 3, color = 'r')
+                # plt.show()
+                return np.mean(sim.cen_density[idx1:idx2])
+        else:
+            raise ValueError("Available modes for calculating central electron density are 'last_idx', 'max_cen' and 'x_hist'")
 
         fig = self.plot_simulation_result_vs_attrib(calculate_max_cen_density, x_axis, curves, common_params = common_params , x_axis_vals = x_axis_vals, curve_vals = curve_vals,
                        usetex = usetex, global_fontsize = global_fontsize, curve_colors = curve_colors,
@@ -794,7 +847,9 @@ class PyECLOUDParameterScan:
         
         plt.semilogy()
         plt.tight_layout()
-        
+        # Enable color indicating instability after threshold
+        # ax = fig.axes[0]
+        # ax.axhspan(5*10**11,ax.get_ylim()[1],color='red',alpha=0.2)
         if returnfig:
             return fig
         if savefig:
@@ -1255,7 +1310,7 @@ class PyECLOUDParameterScan:
                         raise ValueError(f"Parameters must uniquely define simulations. common_params has current value {common_params}. Ensure that all parameters not included in 'x_axis' and 'curves' are specified.") from e
                     if sim:
                         heat_load_element = sim.calculate_heat_load_per_bunch(T_rev = T_rev, unit = unit)
-                        total_heat_load += heat_load_element*magnet_config[config]
+                        total_heat_load += heat_load_element*magnet_config[config] # 4920*
                         n_elements +=1
                 if n_elements == n_elements_in_cell:
                     attrib_vals.append(total_heat_load)
@@ -1316,7 +1371,9 @@ class PyECLOUDParameterScan:
             plt.minorticks_on()
             plt.grid(which='major', linestyle=grid_major_linestyle, linewidth=grid_major_linewidth)
             plt.grid(which='minor', linestyle=grid_minor_linestyle, linewidth=grid_minor_linewidth)
-
+        # Shaded area for value exceeding cooling capacity
+        # ax = fig.axes[0]
+        # ax.axhspan(170,ax.get_ylim()[1],color='red',alpha=0.2)
         if returnfig:
             return fig
         if savefig:

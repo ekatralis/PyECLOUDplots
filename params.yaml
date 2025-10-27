@@ -39,13 +39,19 @@ Photoemission Enabled :
 Photoemission k_pe_st:
   var_name : k_pe_st 
   dtype : float
-  convert_to_pow : True
+  convert_to_pow : False
   unit :
 
 Photoemission refl_frac:
   var_name: refl_frac 
   dtype : float
-  convert_to_pow : True
+  convert_to_pow : False
+  unit :
+
+Dh_beam_field:
+  var_name: Dh_beam_field
+  dtype : float
+  convert_to_pow : False
   unit :
 
 Beam Energy :
