@@ -14,6 +14,8 @@ from typing import Callable, Any, Union
 from time import time
 import matplotlib as mpl
 import yaml
+import pickle
+from tqdm import tqdm
 
 class PyECLOUDsim:
     def __init__(self, input_folder: str, sim_output_filename: str = "output.mat", params_yaml = None, load_sim_data: bool = True):
@@ -53,6 +55,10 @@ class PyECLOUDsim:
             warnings.warn(f"!----Simulation progress below 0.9. Simulation at {self.input_folder} might be incomplete.----!")
         self._load_sim_from_yaml_()
         # self._load_sim_()
+
+    def dump(self, filename: str = "sim_db.pkl"):
+        with open(filename, "wb") as f:
+            pickle.dump(self,f)
 
     # This ensures that all attributes from sim_data are accessible from the main class
     def __getattr__(self, name):
@@ -346,72 +352,84 @@ class PyECLOUDsim:
 
 
 class PyECLOUDParameterScan:
-    def __init__(self, simulations_path: str, params_yaml = None , sim_output_filename: str = "output.mat"):
+    def __init__(self, simulations_path: str, params_yaml = None , sim_output_filename: str = "output.mat", force_rebuild = False):
         if not os.path.exists(simulations_path):
             raise IsADirectoryError("Provided simulations path does not exist")
-        self.simulations_path = simulations_path
-        self.sim_output_filename = sim_output_filename
-        self.sims_per_parameter = {}
-        if not params_yaml:
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            self.params_yaml = os.path.join(script_dir, 'params.yaml')
+        if (not force_rebuild) and os.path.exists(os.path.join(simulations_path,"PyECLOUDparamscan.db")):
+            with open(os.path.join(simulations_path,"PyECLOUDparamscan.db"), "rb") as f:
+                state = pickle.load(f)
+                self.__dict__.update(state)
+                self.simulations_path = os.path.abspath(simulations_path)
         else:
-            if os.path.exists(params_yaml):
-                self.params_yaml = params_yaml
+            self.simulations_path = os.path.abspath(simulations_path)
+            self.sim_output_filename = sim_output_filename
+            self.sims_per_parameter = {}
+            if not params_yaml:
+                script_dir = os.path.dirname(os.path.abspath(__file__))
+                self.params_yaml = os.path.join(script_dir, 'params.yaml')
             else:
-                raise FileNotFoundError("Params YAML file not found")
-        
-        self.params_dict = self.read_yaml_to_dict(self.params_yaml)
-        self.available_params = defaultdict(list)
-        n_sims = self._find_sim_folders_and_extract_params_yaml_()
-        # Convert intensity to smaller range while keeping absolute value
-        self.scaled_vals = []
-
-        for param in self.params_dict.keys():
-            if self.params_dict[param]["dtype"] in ["float", "int"]:
-                if self.params_dict[param]["convert_to_pow"]:
-                    attr_name = param.replace(" ", "_")+"_Pow"
-                    numeric_keys = [k for k in self.sims_per_parameter[param].keys() if k is not None]
-                    setattr(self, attr_name, int(np.log10(np.array(numeric_keys).mean())))
-                    keys = list(self.sims_per_parameter[param].keys())
-                    for key in keys:
-                        if key is not None:
-                            self.sims_per_parameter[param][float(key/(np.pow(10.0,getattr(self, attr_name))))] = self.sims_per_parameter[param].pop(key)
-                    self.scaled_vals.append(param)
-                    
-
-        print(f"Found {n_sims} simulations in {simulations_path}. Available parameters for analysis:")
-
-        # Key used for sorting numerical values
-        def try_numeric(val):
-            try:
-                return float(val)
-            except ValueError:
-                return val
-            except TypeError:
-                return -float("inf")
+                if os.path.exists(params_yaml):
+                    self.params_yaml = params_yaml
+                else:
+                    raise FileNotFoundError("Params YAML file not found")
             
-        for key in self.sims_per_parameter.keys():
-            available_vals = list(self.sims_per_parameter[key].keys())
-            if self.params_dict[key]["dtype"] in ["float","int"]:
-                available_vals.sort(key=try_numeric)
-            if len(available_vals) > 1:
-                attr_name = key.replace(" ", "_")+"_Pow"
-                print(f"-'{key}'. With available values:{' (scaled by 1e%d)' % getattr(self,attr_name) if key in self.scaled_vals else ''}(Data Type: {self.params_dict[key]["dtype"]})")
-                
-                for val in available_vals:
-                    print(f"    ->{val}")
-                    self.available_params[key].append(val)
-        
-        buffer = io.StringIO()
-        sys_stdout = sys.stdout
-        sys.stdout = buffer
-        try:
-            self.print_available_params()
-        finally:
-            sys.stdout = sys_stdout  # Reset stdout
+            self.params_dict = self.read_yaml_to_dict(self.params_yaml)
+            self.available_params = defaultdict(list)
+            n_sims = self._find_sim_folders_and_extract_params_yaml_()
+            # Convert intensity to smaller range while keeping absolute value
+            self.scaled_vals = []
 
-        self.print_available_params_str = buffer.getvalue()
+            for param in self.params_dict.keys():
+                if self.params_dict[param]["dtype"] in ["float", "int"]:
+                    if self.params_dict[param]["convert_to_pow"]:
+                        attr_name = param.replace(" ", "_")+"_Pow"
+                        numeric_keys = [k for k in self.sims_per_parameter[param].keys() if k is not None]
+                        setattr(self, attr_name, int(np.log10(np.array(numeric_keys).mean())))
+                        keys = list(self.sims_per_parameter[param].keys())
+                        for key in keys:
+                            if key is not None:
+                                self.sims_per_parameter[param][float(key/(np.pow(10.0,getattr(self, attr_name))))] = self.sims_per_parameter[param].pop(key)
+                        self.scaled_vals.append(param)
+                        
+
+            print(f"Found {n_sims} simulations in {simulations_path}. Available parameters for analysis:")
+
+            # Key used for sorting numerical values
+            def try_numeric(val):
+                try:
+                    return float(val)
+                except ValueError:
+                    return val
+                except TypeError:
+                    return -float("inf")
+                
+            for key in self.sims_per_parameter.keys():
+                available_vals = list(self.sims_per_parameter[key].keys())
+                if self.params_dict[key]["dtype"] in ["float","int"]:
+                    available_vals.sort(key=try_numeric)
+                if len(available_vals) > 1:
+                    attr_name = key.replace(" ", "_")+"_Pow"
+                    print(f"-'{key}'. With available values:{' (scaled by 1e%d)' % getattr(self,attr_name) if key in self.scaled_vals else ''}(Data Type: {self.params_dict[key]['dtype']})")
+                    
+                    for val in available_vals:
+                        print(f"    ->{val}")
+                        self.available_params[key].append(val)
+            
+            buffer = io.StringIO()
+            sys_stdout = sys.stdout
+            sys.stdout = buffer
+            try:
+                self.print_available_params()
+            finally:
+                sys.stdout = sys_stdout  # Reset stdout
+            
+            self.print_available_params_str = buffer.getvalue()
+
+            with open(os.path.join(simulations_path,"PyECLOUDparamscan.db"), "wb") as f:
+                self.simulations_path = None
+                pickle.dump(self.__dict__, f)
+
+            self.simulations_path = os.path.abspath(simulations_path)
 
     
     def _find_sim_folders_and_extract_params_yaml_(self):
@@ -419,28 +437,28 @@ class PyECLOUDParameterScan:
         param_names = self.params_dict.keys()
         for param in param_names:
             self.sims_per_parameter[param] = defaultdict(set)
-        for root, dirs, files in os.walk(self.simulations_path):
+        for root, dirs, files in tqdm(os.walk(self.simulations_path)):
             if "simulation_parameters.input" in files and self.sim_output_filename in files:
                 sim = PyECLOUDsim(root, params_yaml=self.params_yaml, load_sim_data = False)
                 for param in param_names:
                     attr_name = param.replace(" ", "_")
-                    self.sims_per_parameter[param][getattr(sim,attr_name)].add(root)
+                    self.sims_per_parameter[param][getattr(sim,attr_name)].add(os.path.relpath(root,self.simulations_path))
                 n_sims += 1
         return n_sims
     
-    def _find_sim_folders_and_extract_params_(self):
-        n_sims = 0
-        for root, dirs, files in os.walk(self.simulations_path):
-            if "simulation_parameters.input" in files and self.sim_output_filename in files:
-                sim = PyECLOUDsim(root, params_yaml=self.params_yaml, load_sim_data = False)
-                self.sims_per_parameter["SEY"][sim.SEY].add(root)
-                self.sims_per_parameter["Intensity"][sim.intensity].add(root)
-                self.sims_per_parameter["Magnet Configuration"][sim.magnet_conf].add(root)
-                self.sims_per_parameter["Beam Filling Pattern"][sim.beam_filling_pattern].add(root)
-                self.sims_per_parameter["Photoemission Enabled"][sim.photoemission_enabled].add(root)
-                self.sims_per_parameter["Beam Energy"][sim.beam_energy].add(root)
-                n_sims += 1
-        return n_sims
+    # def _find_sim_folders_and_extract_params_(self):
+    #     n_sims = 0
+    #     for root, dirs, files in os.walk(self.simulations_path):
+    #         if "simulation_parameters.input" in files and self.sim_output_filename in files:
+    #             sim = PyECLOUDsim(root, params_yaml=self.params_yaml, load_sim_data = False)
+    #             self.sims_per_parameter["SEY"][sim.SEY].add(root)
+    #             self.sims_per_parameter["Intensity"][sim.intensity].add(root)
+    #             self.sims_per_parameter["Magnet Configuration"][sim.magnet_conf].add(root)
+    #             self.sims_per_parameter["Beam Filling Pattern"][sim.beam_filling_pattern].add(root)
+    #             self.sims_per_parameter["Photoemission Enabled"][sim.photoemission_enabled].add(root)
+    #             self.sims_per_parameter["Beam Energy"][sim.beam_energy].add(root)
+    #             n_sims += 1
+    #     return n_sims
     
     def get_simulation(self, sim_params: Union[str, dict], is_internal: bool = False):
         '''
@@ -484,10 +502,10 @@ class PyECLOUDParameterScan:
                 if sim_loc == set():
                     if not is_internal:
                         print(f"Simulation found at {sim_loc_final}")
-                    return PyECLOUDsim(sim_loc_final, sim_output_filename = self.sim_output_filename)
+                    return PyECLOUDsim(os.path.join(self.simulations_path, sim_loc_final), sim_output_filename = self.sim_output_filename)
                 else:
                     sim_loc.add(sim_loc_final)
-                    raise Exception(f"Specified parameters do not uniquely define simulation. \n Available simulations for specified parameters are: {sim_loc}\n All available parameters are: \n{self.print_available_params_str}")
+                    raise Exception(f"Specified parameters do not uniquely define simulation. \n Available simulations for specified parameters in {self.simulations_path} are: {sim_loc}\n All available parameters are: \n{self.print_available_params_str}")
         except KeyError:
             raise Exception(f"Check that provided parameters are in available parameters for plotting. All available parameters are: \n{self.print_available_params_str}")
     
@@ -499,7 +517,7 @@ class PyECLOUDParameterScan:
     def print_available_params(self):
         for key in self.available_params.keys():
             attr_name = key.replace(" ", "_")+"_Pow"
-            print(f"-'{key}'. With available values:{' (scaled by 1e%d)' % getattr(self,attr_name) if key in self.scaled_vals else ''} (Data Type: {self.params_dict[key]["dtype"]})")
+            print(f"-'{key}'. With available values:{' (scaled by 1e%d)' % getattr(self,attr_name) if key in self.scaled_vals else ''} (Data Type: {self.params_dict[key]['dtype']})")
             for val in self.available_params[key]:
                 print(f"    ->{val}")
     
@@ -507,7 +525,7 @@ class PyECLOUDParameterScan:
         val_units = {}
         for val in self.params_dict.keys():
             if self.params_dict[val]["unit"]:
-                unit = rf"{{{self.params_dict[val]["unit"]}}}"
+                unit = rf"{{{self.params_dict[val]['unit']}}}"
                 unit_tex = r"\mathrm" + unit.replace(" ", r"\,")
             else:
                 unit_tex = None
@@ -523,7 +541,7 @@ class PyECLOUDParameterScan:
         for val in self.params_dict.keys():
             if val in self.scaled_vals:
                 pow_attr_name = val.replace(" ", "_")+"_Pow"
-                val_units[val] = f"* 10^{getattr(self,pow_attr_name)} {self.params_dict[val]["unit"]}"
+                val_units[val] = f"* 10^{getattr(self,pow_attr_name)} {self.params_dict[val]['unit']}"
             else:
                 val_units[val] = self.params_dict[val]["unit"]
         return val_units
@@ -533,23 +551,23 @@ class PyECLOUDParameterScan:
             yaml_dict = yaml.safe_load(file)
         return yaml_dict
 
-    def _get_curves_with_colors_(self,curves_to_plot: dict, curves_is_str: bool, curve_vals: list = None, 
-                                curve_colors: dict = None, cmap_min_offset: float = 0, cmap_max_offset: float = 0):
-        if curve_colors is None:
-            if curves_is_str and (isinstance(curve_vals[0],float) or isinstance(curve_vals[0],int)):
-                norm = mcolors.Normalize(vmin=min(curve_vals) + cmap_min_offset, vmax=max(curve_vals) + cmap_max_offset)
-                for curve_name, data in curves_to_plot.items():
-                    data["color"] = cmap(norm(curve_name))
-            else:
-                all_avgs = [d["avg"] for d in curves_to_plot.values()]
-                norm = mcolors.Normalize(vmin=min(all_avgs) + cmap_min_offset, vmax=max(all_avgs) + cmap_max_offset)
-                for curve_name, data in curves_to_plot.items():
-                    data["color"] = cmap(norm(data["avg"]))
-                curves_to_plot = dict(sorted(curves_to_plot.items(), key=lambda item: item[1]['avg'], reverse=True))
-        else:
-            for curve_name, data in curves_to_plot.items():
-                data["color"] = curve_colors[curve_name]
-        return curves_to_plot
+    # def _get_curves_with_colors_(self,curves_to_plot: dict, curves_is_str: bool, curve_vals: list = None, 
+    #                             curve_colors: dict = None, cmap_min_offset: float = 0, cmap_max_offset: float = 0):
+    #     if curve_colors is None:
+    #         if curves_is_str and (isinstance(curve_vals[0],float) or isinstance(curve_vals[0],int)):
+    #             norm = mcolors.Normalize(vmin=min(curve_vals) + cmap_min_offset, vmax=max(curve_vals) + cmap_max_offset)
+    #             for curve_name, data in curves_to_plot.items():
+    #                 data["color"] = cmap(norm(curve_name))
+    #         else:
+    #             all_avgs = [d["avg"] for d in curves_to_plot.values()]
+    #             norm = mcolors.Normalize(vmin=min(all_avgs) + cmap_min_offset, vmax=max(all_avgs) + cmap_max_offset)
+    #             for curve_name, data in curves_to_plot.items():
+    #                 data["color"] = cmap(norm(data["avg"]))
+    #             curves_to_plot = dict(sorted(curves_to_plot.items(), key=lambda item: item[1]['avg'], reverse=True))
+    #     else:
+    #         for curve_name, data in curves_to_plot.items():
+    #             data["color"] = curve_colors[curve_name]
+    #     return curves_to_plot
 
     def plot_simulation_result_vs_attrib(self, result_func: Callable[[Any], float], x_axis: str, curves: Union[str, dict], 
                        common_params: dict = {}, attrib_name: str = None, attrib_unit: str = None, x_axis_vals: list = None, curve_vals: list = None,
