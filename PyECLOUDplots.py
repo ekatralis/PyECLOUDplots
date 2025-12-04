@@ -352,7 +352,7 @@ class PyECLOUDsim:
 
 
 class PyECLOUDParameterScan:
-    def __init__(self, simulations_path: str, params_yaml = None , sim_output_filename: str = "output.mat", force_rebuild = False):
+    def __init__(self, simulations_path: str, params_yaml = None , sim_output_filename: str = "output.mat", force_rebuild: bool = False, exclude_folders: list = None):
         if not os.path.exists(simulations_path):
             raise IsADirectoryError("Provided simulations path does not exist")
         if (not force_rebuild) and os.path.exists(os.path.join(simulations_path,"PyECLOUDparamscan.db")):
@@ -430,6 +430,16 @@ class PyECLOUDParameterScan:
                 pickle.dump(self.__dict__, f)
 
             self.simulations_path = os.path.abspath(simulations_path)
+        
+        
+        if exclude_folders is None and os.path.exists(os.path.join(simulations_path,"PyECLOUDparamscan.excl")):
+            with open(os.path.join(simulations_path,"PyECLOUDparamscan.excl"), "rb") as f:
+                exclude_folders = pickle.load(f)
+                assert type(exclude_folders) == list
+
+        self.excluded_folders = exclude_folders
+        if self.excluded_folders is not None:
+            warnings.warn(f"WARNING!: EXCLUDED FOLDERS: {self.excluded_folders}")
 
     
     def _find_sim_folders_and_extract_params_yaml_(self):
@@ -484,14 +494,32 @@ class PyECLOUDParameterScan:
         try:
             sim_loc = None
             if param_num == 1:
-                sim_loc = self.sims_per_parameter[scan_params[0]][sim_params[scan_params[0]]]
+                if type(sim_params[scan_params[0]]) == list:
+                    raise NotImplementedError("Currently lists are only supported for the third parameter onwards")
+                sim_loc = self.sims_per_parameter[scan_params[0]][sim_params[scan_params[0]]].copy()
             elif param_num == 2:
+                if type(sim_params[scan_params[0]]) == list or type(sim_params[scan_params[1]]) == list:
+                    raise NotImplementedError("Currently lists are only supported for the third parameter onwards")
                 sim_loc = self.sims_per_parameter[scan_params[0]][sim_params[scan_params[0]]].intersection(self.sims_per_parameter[scan_params[1]][sim_params[scan_params[1]]])
             elif param_num > 2:
+                if type(sim_params[scan_params[0]]) == list or type(sim_params[scan_params[1]]) == list:
+                    raise NotImplementedError("First two parameters must be scalar")
                 sim_loc = self.sims_per_parameter[scan_params[0]][sim_params[scan_params[0]]].intersection(self.sims_per_parameter[scan_params[1]][sim_params[scan_params[1]]])
                 for i in range(2,param_num):
-                    sim_loc = sim_loc.intersection(self.sims_per_parameter[scan_params[i]][sim_params[scan_params[i]]])
-            
+                    # print(scan_params[i])
+                    if type(sim_params[scan_params[i]]) == list:
+                        intersections = []
+                        for j in range(len(sim_params[scan_params[i]])):
+                            # print(sim_params[scan_params[i]][j])
+                            intersection = sim_loc.copy()
+                            intersection = intersection.intersection(self.sims_per_parameter[scan_params[i]][sim_params[scan_params[i]][j]])
+                            intersections.append(intersection)
+                        sim_loc = set.union(*intersections)
+                    else:
+                        sim_loc = sim_loc.intersection(self.sims_per_parameter[scan_params[i]][sim_params[scan_params[i]]])
+            if self.excluded_folders is not None:
+                # remove any path that contains any excluded folder
+                sim_loc = {p for p in sim_loc if not any(folder in p for folder in self.excluded_folders)}
             if sim_loc == set():
                 if is_internal:
                     return None
@@ -1328,7 +1356,7 @@ class PyECLOUDParameterScan:
                         raise ValueError(f"Parameters must uniquely define simulations. common_params has current value {common_params}. Ensure that all parameters not included in 'x_axis' and 'curves' are specified.") from e
                     if sim:
                         heat_load_element = sim.calculate_heat_load_per_bunch(T_rev = T_rev, unit = unit)
-                        total_heat_load += heat_load_element*magnet_config[config] # 4920*
+                        total_heat_load += 4920* heat_load_element*magnet_config[config] # 4920*
                         n_elements +=1
                 if n_elements == n_elements_in_cell:
                     attrib_vals.append(total_heat_load)
