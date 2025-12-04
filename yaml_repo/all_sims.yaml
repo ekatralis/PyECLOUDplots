@@ -1,0 +1,90 @@
+# 4x36 configurations
+Cu2O Unconditioned [4x36]:
+  SEY Emax :                "332."
+  SEY s_param :             
+  Photoemission k_pe_st:    7.708664e-04
+  Photoemission refl_frac:  1.885900e-01
+  Beam Filling Pattern :    ["2*(4*(36*[1.]+7*[0.]) + 24*[0.])", "3*(4*(36*[1.]+7*[0.]) + 24*[0.])"]
+  Dh_beam_field :           0.0001
+
+Cu2O Conditioned [4x36]:
+  SEY Emax :                "332."
+  SEY s_param :             
+  Photoemission k_pe_st:    1.525536e-04
+  Photoemission refl_frac:  2.027578e-01
+  Beam Filling Pattern :    ["2*(4*(36*[1.]+7*[0.]) + 24*[0.])", "3*(4*(36*[1.]+7*[0.]) + 24*[0.])"]
+  Dh_beam_field :           0.0001
+
+CuO Unconditioned [4x36]:
+  SEY Emax :                "650 / del_max"
+  SEY s_param :             1.25
+  Photoemission k_pe_st:    7.708664e-04
+  Photoemission refl_frac:  1.885900e-01
+  Beam Filling Pattern :    ["2*(4*(36*[1.]+7*[0.]) + 24*[0.])", "3*(4*(36*[1.]+7*[0.]) + 24*[0.])"]
+  Dh_beam_field :           0.0001
+
+CuO Conditioned [4x36]:
+  SEY Emax :                "650 / del_max"
+  SEY s_param :             1.25
+  Photoemission k_pe_st:    1.525536e-04
+  Photoemission refl_frac:  2.027578e-01
+  Beam Filling Pattern :    ["2*(4*(36*[1.]+7*[0.]) + 24*[0.])", "3*(4*(36*[1.]+7*[0.]) + 24*[0.])"]
+  Dh_beam_field :           0.0001
+
+# 2x72 Configurations
+Cu2O Unconditioned [2x72]:
+  SEY Emax :                "332."
+  SEY s_param :             
+  Photoemission k_pe_st:    7.708664e-04
+  Photoemission refl_frac:  1.885900e-01
+  Beam Filling Pattern :    ["2*(2*(72*[1.]+7*[0.]) + 24*[0.])", "3*(2*(72*[1.]+7*[0.]) + 24*[0.])"]
+
+Cu2O Conditioned [2x72]:
+  SEY Emax :                "332."
+  SEY s_param :             
+  Photoemission k_pe_st:    1.525536e-04
+  Photoemission refl_frac:  2.027578e-01
+  Beam Filling Pattern :    ["2*(2*(72*[1.]+7*[0.]) + 24*[0.])", "3*(2*(72*[1.]+7*[0.]) + 24*[0.])"]
+
+CuO Unconditioned [2x72]:
+  SEY Emax :                "650 / del_max"
+  SEY s_param :             1.25
+  Photoemission k_pe_st:    7.708664e-04
+  Photoemission refl_frac:  1.885900e-01
+  Beam Filling Pattern :    ["2*(2*(72*[1.]+7*[0.]) + 24*[0.])", "3*(2*(72*[1.]+7*[0.]) + 24*[0.])"]
+
+CuO Conditioned [2x72]: 
+  SEY Emax :                "650 / del_max"
+  SEY s_param :             1.25
+  Photoemission k_pe_st:    1.525536e-04
+  Photoemission refl_frac:  2.027578e-01
+  Beam Filling Pattern :    ["2*(2*(72*[1.]+7*[0.]) + 24*[0.])", "3*(2*(72*[1.]+7*[0.]) + 24*[0.])"]
+
+# 3x48 configurations
+Cu2O Unconditioned [3x48]:
+  SEY Emax :                "332."
+  SEY s_param :             
+  Photoemission k_pe_st:    7.708664e-04
+  Photoemission refl_frac:  1.885900e-01
+  Beam Filling Pattern :    ["2*(3*(48*[1.]+7*[0.]) + 24*[0.])", "3*(3*(48*[1.]+7*[0.]) + 24*[0.])"]
+
+Cu2O Conditioned [3x48]:
+  SEY Emax :                "332."
+  SEY s_param :             
+  Photoemission k_pe_st:    1.525536e-04
+  Photoemission refl_frac:  2.027578e-01
+  Beam Filling Pattern :    ["2*(3*(48*[1.]+7*[0.]) + 24*[0.])", "3*(3*(48*[1.]+7*[0.]) + 24*[0.])"]
+
+CuO Unconditioned [3x48]:
+  SEY Emax :                "650 / del_max"
+  SEY s_param :             1.25
+  Photoemission k_pe_st:    7.708664e-04
+  Photoemission refl_frac:  1.885900e-01
+  Beam Filling Pattern :    ["2*(3*(48*[1.]+7*[0.]) + 24*[0.])", "3*(3*(48*[1.]+7*[0.]) + 24*[0.])"]
+
+CuO Conditioned [3x48]: 
+  SEY Emax :                "650 / del_max"
+  SEY s_param :             1.25
+  Photoemission k_pe_st:    1.525536e-04
+  Photoemission refl_frac:  2.027578e-01
+  Beam Filling Pattern :    ["2*(3*(48*[1.]+7*[0.]) + 24*[0.])", "3*(3*(48*[1.]+7*[0.]) + 24*[0.])"]
