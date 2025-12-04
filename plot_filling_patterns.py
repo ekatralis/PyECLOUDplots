@@ -95,7 +95,7 @@ if generate_half_cell_load_plots:
                 title = f"Half cell Heat Load for Intensity: {intensity} [{surface_curve},{photoemission_stat}]"
                 output_filename = f"/eos/user/e/ekatrali/ecloud_plots/heat_load/half_cell/{surface_curve}/{photoemission_stat}"
                 os.makedirs(output_filename,exist_ok = True)
-                paramscan.plot_half_cell_heat_load(magnets_in_half_cell, "SEY", sims_for_this, common_params={"Intensity": intensity}, curve_colors=sim_colors, unit = "W"
+                paramscan.plot_half_cell_heat_load(magnets_in_half_cell, "SEY", sims_for_this, common_params={"Intensity": intensity}, curve_colors=sim_colors, unit = "W",
                                                    title=title, global_fontsize=13, show = show, savefig=save, output_filename=output_filename+f"/halfcell_intens{intensity:.2f}.png",
                                                    usetex=tex_available, ylabel = "Heat load [W/4920 bunches]")
                 plt.close('all')
