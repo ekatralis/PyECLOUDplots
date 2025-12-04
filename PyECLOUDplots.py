@@ -1356,7 +1356,7 @@ class PyECLOUDParameterScan:
                         raise ValueError(f"Parameters must uniquely define simulations. common_params has current value {common_params}. Ensure that all parameters not included in 'x_axis' and 'curves' are specified.") from e
                     if sim:
                         heat_load_element = sim.calculate_heat_load_per_bunch(T_rev = T_rev, unit = unit)
-                        total_heat_load += 4920* heat_load_element*magnet_config[config] # 4920*
+                        total_heat_load += heat_load_element*magnet_config[config] # 4920*
                         n_elements +=1
                 if n_elements == n_elements_in_cell:
                     attrib_vals.append(total_heat_load)
