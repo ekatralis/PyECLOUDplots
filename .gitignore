@@ -1,3 +1,6 @@
 plotsnew/*
 old_files/*
 build_db*
+*.DS_Store*
+*__pycache__*
+*~

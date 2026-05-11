@@ -59,3 +59,8 @@ Beam Energy :
   dtype : float
   convert_to_pow : True
   unit : "eV"
+
+Bunch Length:
+  var_name : sigmaz
+  dtype : str
+  unit : "m"
