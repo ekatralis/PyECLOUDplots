@@ -5,9 +5,10 @@ import os
 show = False
 save = True
 generate_cen_plots = False
-generate_heat_load_plots = False
+generate_heat_load_plots_sey = False
+generate_heat_load_plots_intensity = True
 generate_half_cell_load_plots = False
-plot_buildup = True
+plot_buildup = False
 tex_available = False
 
 # paramscan = PyECLOUDParameterScan("C:\\Users\\smbso\\cernbox\\simulations")
@@ -54,7 +55,7 @@ if generate_cen_plots:
 heat_load_lims = {"Dipoles": 1.8,
                   "Quadrupoles" : 6.5,
                   "Drift" : 4.5}
-if generate_heat_load_plots:
+if generate_heat_load_plots_sey:
     for intensity in paramscan.get_param_values("Intensity"):
         for surface_curve in ["CuO", "Cu2O"]:
             for photoemission_stat in ["Conditioned", "Unconditioned"]:
@@ -69,7 +70,7 @@ if generate_heat_load_plots:
                         sims_for_this[out_key] = sim_configs[key]
 
                 for magnet_config in manget_conf.keys():
-                    output_filename = f"/eos/user/e/ekatrali/ecloud_plots/heat_load/{magnet_config}/{surface_curve}/{photoemission_stat}"
+                    output_filename = f"/eos/user/e/ekatrali/ecloud_plots/heat_load_sey/{magnet_config}/{surface_curve}/{photoemission_stat}"
                     title = f"Heat load for {magnet_config} for Intensity: {intensity} [{surface_curve},{photoemission_stat}]"
                     os.makedirs(output_filename,exist_ok = True)
                     paramscan.plot_heat_load("SEY", sims_for_this, common_params={"Intensity":intensity, "Magnet Configuration": manget_conf[magnet_config]["Magnet Configuration"]}, 
@@ -77,6 +78,31 @@ if generate_heat_load_plots:
                                              global_fontsize=13, show = show, savefig=save, output_filename=output_filename+f"/heatload_intens{intensity:.2f}_{magnet_config}.png",
                                              usetex=tex_available)
                     plt.close('all')
+
+if generate_heat_load_plots_intensity:
+    for sey in paramscan.get_param_values("SEY"):
+        for surface_curve in ["CuO", "Cu2O"]:
+            for photoemission_stat in ["Conditioned", "Unconditioned"]:
+                sims_for_this = {}
+                for key in sim_configs.keys():
+                    if surface_curve in key and photoemission_stat in key:
+                        out_key = key.replace(surface_curve,'')
+                        out_key = out_key.replace(' ','')
+                        out_key = out_key.replace('[','')
+                        out_key = out_key.replace(']','')
+                        out_key = out_key.replace(photoemission_stat,'')
+                        sims_for_this[out_key] = sim_configs[key]
+
+                for magnet_config in manget_conf.keys():
+                    output_filename = f"/eos/user/e/ekatrali/ecloud_plots/heat_load_intensity/{magnet_config}/{surface_curve}/{photoemission_stat}"
+                    title = f"Heat load for {magnet_config} for SEY: {sey} [{surface_curve},{photoemission_stat}]"
+                    os.makedirs(output_filename,exist_ok = True)
+                    paramscan.plot_heat_load("Intensity", sims_for_this, common_params={"SEY":sey, "Magnet Configuration": manget_conf[magnet_config]["Magnet Configuration"]},
+                                             title=title, cmap = plt.cm.magma, curve_colors=sim_colors, top_lim = heat_load_lims[magnet_config],
+                                             global_fontsize=13, show = show, savefig=save, output_filename=output_filename+f"/heatload_sey{sey:.2f}_{magnet_config}.png",
+                                             usetex=tex_available)
+                    plt.close('all')
+
 # paramscan.plot_half_cell_heat_load(magnets_in_half_cell, "SEY", "Intensity", common_params=sim_configs["Regular Photoemission"])
 if generate_half_cell_load_plots:
     for intensity in paramscan.get_param_values("Intensity"):
