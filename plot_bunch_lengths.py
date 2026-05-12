@@ -2,6 +2,7 @@ from PyECLOUDplots import PyECLOUDParameterScan
 import matplotlib.pyplot as plt
 import os
 
+BASE_DIR = "/eos/project/e/ecloud-simulations/ekatrali/LHC_6.8TeV_Arcs_Filling_Pattern_Scan/LHC_6.8TeV_Arcs_3x48_5_trains"
 show = False
 save = True
 skip_existing = False
@@ -12,7 +13,7 @@ generate_half_cell_load_plots = True
 plot_buildup = True
 tex_available = False
 
-paramscan = PyECLOUDParameterScan("/eos/project/e/ecloud-simulations/ekatrali/LHC_6.8TeV_Arcs_Filling_Pattern_Scan")
+paramscan = PyECLOUDParameterScan(BASE_DIR)
 sim_configs = paramscan.read_yaml_to_dict("./yaml_repo/b_length_3x48.yaml")
 manget_conf = paramscan.read_yaml_to_dict("./yaml_repo/magnet_configs.yaml")
 # sim_colors = None
@@ -56,9 +57,9 @@ if generate_cen_plots:
                 for b_length in b_lengths.keys():
                     sims_for_this[b_length] = { 'Bunch Length': b_lengths[b_length] } | sim_configs[f"{surface_curve} {photoemission_stat} [3x48]"]
                 for magnet_config in manget_conf.keys():
-                    output_dir = f"/eos/project/e/ecloud-simulations/ekatrali/LHC_6.8TeV_Arcs_Filling_Pattern_Scan/analysis/central_density/{magnet_config}/{surface_curve}/{photoemission_stat}"
+                    output_dir = os.path.join(BASE_DIR, f"analysis/central_density/{magnet_config}/{surface_curve}/{photoemission_stat}")
                     os.makedirs(output_dir,exist_ok = True)
-                    output_filename = output_dir+f"/cen_sey{sey:.2f}_{magnet_config}.png"
+                    output_filename = os.path.join(output_dir, f"cen_sey{sey:.2f}_{magnet_config}.png")
                     if skip_existing:
                         if os.path.exists(output_filename):
                             continue
@@ -83,9 +84,9 @@ if generate_heat_load_plots_sey:
                     sims_for_this[b_length] = { 'Bunch Length': b_lengths[b_length] } | sim_configs[f"{surface_curve} {photoemission_stat} [3x48]"]
 
                 for magnet_config in manget_conf.keys():
-                    output_dir = f"/eos/project/e/ecloud-simulations/ekatrali/LHC_6.8TeV_Arcs_Filling_Pattern_Scan/analysis/heat_load_sey/{magnet_config}/{surface_curve}/{photoemission_stat}"
+                    output_dir = os.path.join(BASE_DIR, f"analysis/heat_load_sey/{magnet_config}/{surface_curve}/{photoemission_stat}")
                     os.makedirs(output_dir,exist_ok = True)
-                    output_filename = output_dir+f"/heatload_intens{intensity:.2f}_{magnet_config}.png"
+                    output_filename = os.path.join(output_dir, f"heatload_intens{intensity:.2f}_{magnet_config}.png")
                     if skip_existing:
                         if os.path.exists(output_filename):
                             continue
@@ -107,9 +108,9 @@ if generate_heat_load_plots_intensity:
                     sims_for_this[b_length] = { 'Bunch Length': b_lengths[b_length] } | sim_configs[f"{surface_curve} {photoemission_stat} [3x48]"]
 
                 for magnet_config in manget_conf.keys():
-                    output_dir = f"/eos/project/e/ecloud-simulations/ekatrali/LHC_6.8TeV_Arcs_Filling_Pattern_Scan/analysis/heat_load_intensity/{magnet_config}/{surface_curve}/{photoemission_stat}"
+                    output_dir = os.path.join(BASE_DIR, f"analysis/heat_load_intensity/{magnet_config}/{surface_curve}/{photoemission_stat}")
                     os.makedirs(output_dir,exist_ok = True)
-                    output_filename = output_dir + f"/heatload_sey{sey:.2f}_{magnet_config}.png"
+                    output_filename = os.path.join(output_dir, f"heatload_sey{sey:.2f}_{magnet_config}.png")
                     if skip_existing:
                         if os.path.exists(output_filename):
                             continue
@@ -132,9 +133,9 @@ if generate_half_cell_load_plots:
                     sims_for_this[b_length] = { 'Bunch Length': b_lengths[b_length] } | sim_configs[f"{surface_curve} {photoemission_stat} [3x48]"]
 
                 title = f"Half cell Heat Load for Intensity: {intensity} [{surface_curve},{photoemission_stat}, 3x48]"
-                output_dir = f"/eos/project/e/ecloud-simulations/ekatrali/LHC_6.8TeV_Arcs_Filling_Pattern_Scan/analysis/heat_load/half_cell/{surface_curve}/{photoemission_stat}"
+                output_dir = os.path.join(BASE_DIR, f"analysis/heat_load/half_cell/{surface_curve}/{photoemission_stat}")
                 os.makedirs(output_dir,exist_ok = True)
-                output_filename = output_dir + f"/halfcell_intens{intensity:.2f}.png"
+                output_filename = os.path.join(output_dir, f"halfcell_intens{intensity:.2f}.png")
                 if skip_existing:
                     if os.path.exists(output_filename):
                         continue
@@ -156,9 +157,9 @@ if plot_buildup:
                             sims_for_this[b_length] = { 'Bunch Length': b_lengths[b_length] } | sim_configs[f"{surface_curve} {photoemission_stat} [3x48]"]
                             for sim in sims_for_this.keys():
                                 title = f"Buildup as a function of SEY [Intensity:{intensity},{sim},{surface_curve},{photoemission_stat}, 3x48]"
-                                output_dir = f"/eos/project/e/ecloud-simulations/ekatrali/LHC_6.8TeV_Arcs_Filling_Pattern_Scan/analysis/buildup/{magnet_config}/{surface_curve}/{photoemission_stat}/{sim}/"
+                                output_dir = os.path.join(BASE_DIR, f"analysis/buildup/{magnet_config}/{surface_curve}/{photoemission_stat}/{sim}/")
                                 os.makedirs(output_dir,exist_ok = True)
-                                output_filename = output_dir +f"buildup_intens{intensity:.2f}.png"
+                                output_filename = os.path.join(output_dir, f"buildup_intens{intensity:.2f}.png")
                                 if skip_existing:
                                     if os.path.exists(output_filename):
                                         continue
